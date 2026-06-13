@@ -29,6 +29,54 @@ fn print_json<T: serde::Serialize>(val: &T) {
     println!("{}", serde_json::to_string_pretty(val).unwrap());
 }
 
+/// 检查 npm 更新（1 天缓存）
+async fn check_update() {
+    const CURRENT: &str = env!("CARGO_PKG_VERSION");
+    let home = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE"))
+        .unwrap_or_else(|_| ".".to_string());
+    let cache_file = std::path::PathBuf::from(home).join(".pnw-update");
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+
+    // 检查缓存（24小时内不重复查）
+    if let Ok(content) = std::fs::read_to_string(&cache_file) {
+        if let Ok(last) = content.trim().parse::<u64>() {
+            if now - last < 86400 {
+                return;
+            }
+        }
+    }
+
+    // 异步查 npm registry
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build().ok();
+    if let Some(client) = client {
+        if let Ok(resp) = client
+            .get("https://registry.npmjs.org/private-novel-writer/latest")
+            .send().await
+        {
+            if let Ok(json) = resp.json::<serde_json::Value>().await {
+                if let Some(latest) = json["version"].as_str() {
+                    if latest != CURRENT {
+                        eprintln!(
+                            "\x1b[33m⚠ 新版本可用: v{} (当前 v{})\x1b[0m\n  \x1b[2m更新: npm install -g private-novel-writer@alpha\x1b[0m\n",
+                            latest, CURRENT
+                        );
+                    }
+                }
+            }
+        }
+    }
+    // 写缓存
+    if let Some(parent) = cache_file.parent() {
+        std::fs::create_dir_all(parent).ok();
+    }
+    let _ = std::fs::write(&cache_file, now.to_string());
+}
+
 // ─── CLI args ───
 
 #[derive(Parser)]
@@ -347,6 +395,7 @@ enum SampleCommands {
 #[tokio::main]
 async fn main() {
     dotenv::dotenv().ok();
+    check_update().await;
     let cli = Cli::parse();
 
     match &cli.command {
