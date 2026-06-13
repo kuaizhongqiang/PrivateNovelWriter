@@ -278,6 +278,26 @@ fn get_setting(state: State<AppState>) -> Result<serde_json::Value, String> {
     Ok(serde_json::to_value(output).unwrap_or_default())
 }
 
+#[tauri::command]
+fn list_samples(state: State<AppState>) -> Result<serde_json::Value, String> {
+    let guard = get_conn(&state)?;
+    let conn = guard.as_ref().ok_or("No connection")?;
+    let novel_id = active_novel_id(conn)?;
+    let handler = ensure_handler(&state)?;
+    let output = handler.execute(DataCommand::ListSamples { novel_id }).map_err(|e| e.to_string())?;
+    Ok(serde_json::to_value(output).unwrap_or_default())
+}
+
+#[tauri::command]
+fn get_plugin(state: State<AppState>) -> Result<serde_json::Value, String> {
+    let guard = get_conn(&state)?;
+    let conn = guard.as_ref().ok_or("No connection")?;
+    let novel_id = active_novel_id(conn)?;
+    let handler = ensure_handler(&state)?;
+    let output = handler.execute(DataCommand::GetPlugin { novel_id }).map_err(|e| e.to_string())?;
+    Ok(serde_json::to_value(output).unwrap_or_default())
+}
+
 // ─── App Entry ───
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -294,6 +314,7 @@ pub fn run() {
             open_project, new_project, get_project_path,
             get_outline, get_chapter, save_chapter,
             agent_chat, get_stats, list_characters, get_setting,
+            list_samples, get_plugin,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

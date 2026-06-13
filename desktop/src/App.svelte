@@ -1,109 +1,75 @@
 <script lang="ts">
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
-  import { onMount } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
   import ProjectTree from './lib/ProjectTree.svelte';
   import Editor from './lib/Editor.svelte';
   import AgentPanel from './lib/AgentPanel.svelte';
+  import CharacterPanel from './lib/CharacterPanel.svelte';
+  import SettingPanel from './lib/SettingPanel.svelte';
+  import SamplePanel from './lib/SamplePanel.svelte';
 
   let projectPath = $state('');
   let novelId = $state('');
-  let novelName = $state('');
-  let novels = $state<any[]>([]);
   let outline = $state<any>(null);
   let currentChapterId = $state<string | null>(null);
   let currentChapter = $state<any>(null);
   let chapterContent = $state('');
-  let agentMessages = $state<Array<{role: string, content: string, type?: string}>>([]);
+  let agentMessages = $state<Array<{role: string; content: string; type?: string}>>([]);
   let stats = $state<any>(null);
+  let characters = $state<any[]>([]);
+  let setting = $state<any>(null);
+  let samples = $state<any[]>([]);
   let showNewNovel = $state(false);
   let newNovelName = $state('');
-  let currentStreamingId = $state<number>(0);
+  let sidebarTab = $state<'outline' | 'characters' | 'setting' | 'samples'>('outline');
   let eventUnlisten: (() => void) | null = null;
 
-  // 单一事件监听，组件生命周期内有效
   onMount(async () => {
     eventUnlisten = await listen<any>('llm-event', (event) => {
       const payload = event.payload;
-      // 只处理当前活跃消息的事件
       if (agentMessages.length === 0) return;
       const lastMsg = agentMessages[agentMessages.length - 1];
       if (lastMsg.role !== 'assistant') return;
-
       switch (payload.type) {
-        case 'token':
-          lastMsg.content += payload.data;
-          agentMessages = [...agentMessages];
-          break;
-        case 'thinking':
-          lastMsg.content += `🧠 ${payload.data}`;
-          agentMessages = [...agentMessages];
-          break;
-        case 'step':
-          // 显示步骤状态
-          lastMsg.content += `\n⚙️ ${payload.name}: ${payload.status}`;
-          agentMessages = [...agentMessages];
-          break;
-        case 'tool_call':
-          lastMsg.content += `\n🔧 调用工具: ${payload.name}`;
-          agentMessages = [...agentMessages];
-          break;
-        case 'done':
-          lastMsg.type = 'done';
-          agentMessages = [...agentMessages];
-          break;
-        case 'error':
-          lastMsg.content += `\n❌ ${payload.data}`;
-          lastMsg.type = 'error';
-          agentMessages = [...agentMessages];
-          break;
+        case 'token': lastMsg.content += payload.data; agentMessages = [...agentMessages]; break;
+        case 'thinking': lastMsg.content += `🧠 ${payload.data}`; agentMessages = [...agentMessages]; break;
+        case 'step': lastMsg.content += `\n⚙️ ${payload.name}: ${payload.status}`; agentMessages = [...agentMessages]; break;
+        case 'tool_call': lastMsg.content += `\n🔧 调用工具: ${payload.name}`; agentMessages = [...agentMessages]; break;
+        case 'done': lastMsg.type = 'done'; agentMessages = [...agentMessages]; break;
+        case 'error': lastMsg.content += `\n❌ ${payload.data}`; lastMsg.type = 'error'; agentMessages = [...agentMessages]; break;
       }
     });
-
-    // Try to restore last project
     try {
       const p = await invoke<string | null>('get_project_path');
-      if (p) {
-        projectPath = p;
-        await loadProject();
-      }
+      if (p) { projectPath = p; await loadProject(); }
     } catch {}
   });
 
-  // 清理事件监听
-  import { onDestroy } from 'svelte';
-  onDestroy(() => {
-    if (eventUnlisten) eventUnlisten();
-  });
+  onDestroy(() => { if (eventUnlisten) eventUnlisten(); });
 
   async function loadProject() {
     try {
-      const result = await invoke<any>('list_novels');
-      const list = result?.NovelList || [];
-      novels = list;
-      if (list.length > 0) {
-        novelId = list[0].id;
-        novelName = list[0].name;
-        await refreshOutline();
-        await refreshStats();
-      }
-    } catch (e) {
-      console.error('load project error:', e);
-    }
-  }
-
-  async function refreshOutline() {
-    if (!novelId) return;
-    try {
-      outline = await invoke<any>('get_outline', { novelId });
-    } catch {}
+      const result = await invoke<any>('get_outline');
+      outline = result;
+      await refreshStats();
+      await refreshCharacters();
+      await refreshSetting();
+      await refreshSamples();
+    } catch (e) { console.error(e); }
   }
 
   async function refreshStats() {
-    if (!novelId) return;
-    try {
-      stats = await invoke<any>('get_stats', { novelId });
-    } catch {}
+    try { stats = await invoke<any>('get_stats'); } catch {}
+  }
+  async function refreshCharacters() {
+    try { characters = await invoke<any>('list_characters'); characters = characters?.CharacterList ?? []; } catch {}
+  }
+  async function refreshSetting() {
+    try { setting = await invoke<any>('get_setting'); setting = setting?.Setting ?? null; } catch {}
+  }
+  async function refreshSamples() {
+    try { samples = await invoke<any>('list_samples'); samples = samples?.SampleList ?? []; } catch {}
   }
 
   async function handleOpenProject() {
@@ -113,9 +79,7 @@
       try {
         projectPath = await invoke<string>('open_project', { path: dir });
         await loadProject();
-      } catch (e) {
-        agentMessages = [...agentMessages, { role: 'system', content: `打开项目失败: ${e}` }];
-      }
+      } catch (e) { agentMessages = [...agentMessages, { role: 'system', content: `打开失败: ${e}` }]; }
     }
   }
 
@@ -123,13 +87,10 @@
     if (!newNovelName.trim()) return;
     try {
       projectPath = await invoke<string>('new_project', { name: newNovelName.trim() });
-      newNovelName = '';
-      showNewNovel = false;
+      newNovelName = ''; showNewNovel = false;
       await loadProject();
-      agentMessages = [...agentMessages, { role: 'system', content: `✅ 已创建新项目` }];
-    } catch (e) {
-      agentMessages = [...agentMessages, { role: 'system', content: `创建失败: ${e}` }];
-    }
+      agentMessages = [...agentMessages, { role: 'system', content: '✅ 已创建新项目' }];
+    } catch (e) { agentMessages = [...agentMessages, { role: 'system', content: `创建失败: ${e}` }]; }
   }
 
   async function handleSelectChapter(chapterId: string) {
@@ -138,56 +99,40 @@
       const result = await invoke<any>('get_chapter', { chapterId });
       currentChapter = result.chapter;
       chapterContent = result.content;
-    } catch (e) {
-      console.error('load chapter error:', e);
-    }
+    } catch (e) { console.error(e); }
   }
 
   async function handleSaveContent(content: string) {
     if (!currentChapterId) return;
     chapterContent = content;
-    try {
-      await invoke('save_chapter', { chapterId: currentChapterId, content });
-    } catch (e) {
-      console.error('save error:', e);
-    }
+    try { await invoke('save_chapter', { chapterId: currentChapterId, content }); } catch (e) { console.error(e); }
   }
 
   function classifyCommand(msg: string): { commandType: string, chapterId?: string } {
     const lower = msg.toLowerCase();
-    if (lower.startsWith('/evaluate') || lower.includes('评估') && !lower.includes('大纲')) {
-      return { commandType: 'evaluate' };
-    }
-    if (lower.startsWith('/revise') || lower.includes('修改') || lower.includes('改写')) {
-      return { commandType: 'revise', chapterId: currentChapterId || undefined };
-    }
-    if (lower.startsWith('/plan') || lower.includes('规划') && lower.includes('大纲')) {
-      return { commandType: 'plan' };
-    }
+    if (lower.startsWith('/eval') || lower.includes('评估')) return { commandType: 'evaluate' };
+    if (lower.startsWith('/rev') || lower.includes('修改') || lower.includes('改写')) return { commandType: 'revise', chapterId: currentChapterId || undefined };
+    if (lower.startsWith('/plan') || (lower.includes('规划') && lower.includes('大纲'))) return { commandType: 'plan' };
     return { commandType: 'write' };
   }
 
   async function handleSendMessage(msg: string) {
-    if (!novelId || !msg.trim()) return;
+    if (!msg.trim()) return;
     const { commandType, chapterId } = classifyCommand(msg);
-    const placeholderId = ++currentStreamingId;
-    agentMessages = [...agentMessages, { role: 'user', content: msg }];
-    agentMessages = [...agentMessages, { role: 'assistant', content: '', type: 'streaming', _id: placeholderId }];
-
+    agentMessages = [...agentMessages, { role: 'user', content: msg }, { role: 'assistant', content: '', type: 'streaming' }];
     try {
-      const summary = await invoke<string>('agent_chat', {
-        commandType,
-        chapterId: chapterId || null,
-        message: msg,
-      });
+      const summary = await invoke<string>('agent_chat', { commandType, chapterId: chapterId || null, message: msg });
       agentMessages[agentMessages.length - 1] = { role: 'assistant', content: summary, type: 'done' };
       agentMessages = [...agentMessages];
-      await refreshOutline();
-      await refreshStats();
+      await Promise.all([refreshOutline(), refreshStats()]);
     } catch (e) {
       agentMessages[agentMessages.length - 1] = { role: 'assistant', content: `错误: ${e}`, type: 'error' };
       agentMessages = [...agentMessages];
     }
+  }
+
+  async function refreshOutline() {
+    try { outline = await invoke<any>('get_outline'); } catch {}
   }
 </script>
 
@@ -196,46 +141,47 @@
   <aside class="sidebar">
     <div class="sidebar-header">
       <h1>NovelWriter</h1>
-      {#if novelName}
-        <span class="novel-name">{novelName}</span>
-      {/if}
     </div>
-
     <div class="sidebar-actions">
       <button class="btn btn-primary" onclick={() => showNewNovel = true}>➕ 新建</button>
       <button class="btn btn-secondary" onclick={handleOpenProject}>📂 打开</button>
     </div>
-
     {#if showNewNovel}
       <div class="new-novel-form">
-        <input
-          type="text"
-          bind:value={newNovelName}
-          placeholder="小说名称"
-          onkeydown={(e) => e.key === 'Enter' && handleNewNovel()}
-        />
+        <input type="text" bind:value={newNovelName} placeholder="小说名称"
+               onkeydown={(e) => (e.key === 'Enter') && handleNewNovel()} />
         <button class="btn btn-small" onclick={handleNewNovel}>创建</button>
       </div>
     {/if}
 
-    {#if outline}
-      <ProjectTree
-        outline={outline}
-        onselect={handleSelectChapter}
-        currentChapterId={currentChapterId}
-      />
-    {/if}
+    <!-- Sidebar Tabs -->
+    <div class="sidebar-tabs">
+      <button class="tab" class:active={sidebarTab === 'outline'} onclick={() => sidebarTab = 'outline'}>📂</button>
+      <button class="tab" class:active={sidebarTab === 'characters'} onclick={() => sidebarTab = 'characters'}>👤</button>
+      <button class="tab" class:active={sidebarTab === 'setting'} onclick={() => sidebarTab = 'setting'}>⚙</button>
+      <button class="tab" class:active={sidebarTab === 'samples'} onclick={() => sidebarTab = 'samples'}>📋</button>
+    </div>
 
+    <!-- Tab Content -->
+    <div class="tab-content">
+      {#if sidebarTab === 'outline'}
+        {#if outline}
+          <ProjectTree outline={outline} onselect={handleSelectChapter} currentChapterId={currentChapterId} />
+        {/if}
+      {:else if sidebarTab === 'characters'}
+        <CharacterPanel {characters} />
+      {:else if sidebarTab === 'setting'}
+        <SettingPanel {setting} />
+      {:else if sidebarTab === 'samples'}
+        <SamplePanel {samples} />
+      {/if}
+    </div>
+
+    <!-- Stats (always visible) -->
     {#if stats}
-      <div class="stats-panel">
-        <div class="stat-item">
-          <span class="stat-label">已写</span>
-          <span class="stat-value">{stats.total_written}字</span>
-        </div>
-        <div class="stat-item">
-          <span class="stat-label">章节</span>
-          <span class="stat-value">{stats.written_chapters}/{stats.planned_chapters}</span>
-        </div>
+      <div class="stats-bar">
+        <div class="stat"><span class="stat-label">已写</span><span class="stat-val">{stats.total_written}字</span></div>
+        <div class="stat"><span class="stat-label">章节</span><span class="stat-val">{stats.written_chapters}/{stats.planned_chapters}</span></div>
       </div>
     {/if}
   </aside>
@@ -243,11 +189,7 @@
   <!-- Editor -->
   <main class="editor-area">
     {#if currentChapter}
-      <Editor
-        chapter={currentChapter}
-        content={chapterContent}
-        onsave={handleSaveContent}
-      />
+      <Editor chapter={currentChapter} content={chapterContent} onsave={handleSaveContent} />
     {:else}
       <div class="editor-empty">
         <p>从左侧选择一个章节开始写作</p>
@@ -258,149 +200,47 @@
 
   <!-- Agent Panel -->
   <aside class="agent-panel">
-    <AgentPanel
-      messages={agentMessages}
-      onsend={handleSendMessage}
-    />
+    <AgentPanel messages={agentMessages} onsend={handleSendMessage} />
   </aside>
 </div>
 
 <style>
-  .app-layout {
-    display: grid;
-    grid-template-columns: 260px 1fr 320px;
-    height: 100vh;
-    overflow: hidden;
-  }
+  .app-layout { display: grid; grid-template-columns: 260px 1fr 320px; height: 100vh; overflow: hidden; }
+  .sidebar { background: var(--bg-secondary); border-right: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; }
+  .sidebar-header { padding: 12px 16px; border-bottom: 1px solid var(--border); }
+  .sidebar-header h1 { font-size: 16px; font-weight: 700; color: var(--accent); }
+  .sidebar-actions { padding: 10px 12px; display: flex; gap: 6px; }
+  .new-novel-form { padding: 0 12px 10px; display: flex; gap: 6px; }
+  .new-novel-form input { flex: 1; padding: 6px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; color: var(--text); font-size: 13px; }
 
-  .sidebar {
-    background: var(--bg-secondary);
-    border-right: 1px solid var(--border);
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
+  /* Tabs */
+  .sidebar-tabs { display: flex; border-bottom: 1px solid var(--border); padding: 0 4px; }
+  .tab {
+    flex: 1; padding: 8px 0; background: none; color: var(--text-dim); font-size: 14px;
+    border: none; border-bottom: 2px solid transparent; transition: all 0.15s;
   }
+  .tab:hover { color: var(--text); }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
 
-  .sidebar-header {
-    padding: 16px;
-    border-bottom: 1px solid var(--border);
-  }
+  .tab-content { flex: 1; overflow-y: auto; }
 
-  .sidebar-header h1 {
-    font-size: 16px;
-    font-weight: 700;
-    color: var(--accent);
-  }
-
-  .novel-name {
-    font-size: 12px;
-    color: var(--text-dim);
-    margin-top: 4px;
-    display: block;
-  }
-
-  .sidebar-actions {
-    padding: 12px;
-    display: flex;
-    gap: 8px;
-  }
-
-  .new-novel-form {
-    padding: 0 12px 12px;
-    display: flex;
-    gap: 8px;
-  }
-
-  .new-novel-form input {
-    flex: 1;
-    padding: 6px 10px;
-    background: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    color: var(--text);
-    font-size: 13px;
-  }
-
-  .stats-panel {
-    padding: 12px;
+  .stats-bar {
+    display: flex; gap: 12px; padding: 8px 12px;
     border-top: 1px solid var(--border);
-    display: flex;
-    gap: 16px;
   }
+  .stat { display: flex; flex-direction: column; }
+  .stat-label { font-size: 10px; color: var(--text-dim); text-transform: uppercase; }
+  .stat-val { font-size: 13px; font-weight: 600; }
 
-  .stat-item {
-    display: flex;
-    flex-direction: column;
-  }
+  .editor-area { background: var(--bg); overflow: hidden; display: flex; flex-direction: column; }
+  .editor-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: var(--text-dim); gap: 8px; }
+  .agent-panel { background: var(--bg-secondary); border-left: 1px solid var(--border); overflow: hidden; }
 
-  .stat-label {
-    font-size: 11px;
-    color: var(--text-dim);
-  }
-
-  .stat-value {
-    font-size: 14px;
-    font-weight: 600;
-  }
-
-  .editor-area {
-    background: var(--bg);
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-  }
-
-  .editor-empty {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    height: 100%;
-    color: var(--text-dim);
-    gap: 8px;
-  }
-
-  .editor-empty p { margin: 0; }
-
-  .agent-panel {
-    background: var(--bg-secondary);
-    border-left: 1px solid var(--border);
-    overflow: hidden;
-  }
-
-  .btn {
-    padding: 6px 12px;
-    border-radius: 4px;
-    font-size: 13px;
-    font-weight: 500;
-  }
-
-  .btn-primary {
-    background: var(--accent);
-    color: white;
-  }
-
-  .btn-primary:hover {
-    background: var(--accent-hover);
-  }
-
-  .btn-secondary {
-    background: var(--bg-panel);
-    color: var(--text);
-    border: 1px solid var(--border);
-  }
-
-  .btn-secondary:hover {
-    background: var(--border);
-  }
-
-  .btn-small {
-    padding: 4px 10px;
-    background: var(--accent);
-    color: white;
-    font-size: 12px;
-    border-radius: 3px;
-  }
-
+  .btn { padding: 6px 12px; border-radius: 4px; font-size: 13px; font-weight: 500; }
+  .btn-primary { background: var(--accent); color: white; }
+  .btn-primary:hover { background: var(--accent-hover); }
+  .btn-secondary { background: var(--bg-panel); color: var(--text); border: 1px solid var(--border); }
+  .btn-secondary:hover { background: var(--border); }
+  .btn-small { padding: 4px 10px; background: var(--accent); color: white; font-size: 12px; border-radius: 3px; }
   .text-dim { color: var(--text-dim); }
 </style>
