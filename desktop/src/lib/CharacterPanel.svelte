@@ -1,5 +1,5 @@
 <script lang="ts">
-  let { characters = [] } = $props<{ characters: any[] }>();
+  let { characters = [], onadd } = $props<{ characters: any[]; onadd: () => void }>();
 
   let actor = $derived(characters.filter((c: any) => c.char_type === 0));
   let actresses = $derived(characters.filter((c: any) => c.char_type === 1));
@@ -7,7 +7,10 @@
 </script>
 
 <div class="panel">
-  <h3 class="panel-title">👤 角色</h3>
+  <div class="panel-header">
+    <h3 class="panel-title">👤 角色</h3>
+    <button class="add-btn" onclick={onadd}>+ 添加</button>
+  </div>
   {#if characters.length === 0}
     <p class="empty">暂无角色数据</p>
   {:else}
@@ -43,7 +46,10 @@
 
 <style>
   .panel { padding: 8px; }
-  .panel-title { font-size: 13px; font-weight: 600; margin-bottom: 8px; color: var(--text-dim); }
+  .panel-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+  .panel-title { font-size: 13px; font-weight: 600; color: var(--text-dim); }
+  .add-btn { padding: 3px 10px; background: var(--accent); color: white; border-radius: 4px; font-size: 11px; font-weight: 500; }
+  .add-btn:hover { background: var(--accent-hover); }
   .empty { font-size: 12px; color: var(--text-dim); text-align: center; padding: 20px; }
   .group-label { font-size: 11px; color: var(--text-dim); margin: 8px 4px 4px; text-transform: uppercase; letter-spacing: 0.5px; }
   .card {

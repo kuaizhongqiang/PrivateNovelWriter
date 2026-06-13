@@ -289,6 +289,44 @@ fn get_plugin(state: State<AppState>) -> Result<serde_json::Value, String> {
     Ok(serde_json::to_value(output).unwrap_or_default())
 }
 
+// ─── Write Commands (新增数据) ───
+
+#[tauri::command]
+fn add_outline_phase(state: State<AppState>, name: String) -> Result<String, String> {
+    let handler = ensure_handler(&state)?;
+    let novel_id = active_novel_id(&handler.conn)?;
+    let phases = crud::list_outline_phases(&handler.conn, &novel_id).map_err(|e| e.to_string())?;
+    let sort = phases.iter().map(|p| p.sort).max().unwrap_or(-1) + 1;
+    let id = uuid::Uuid::new_v4().to_string();
+    let cmd = DataCommand::CreateOutlinePhase { id: id.clone(), novel_id, sort, name, description: String::new() };
+    handler.execute(cmd).map_err(|e| e.to_string())?;
+    Ok(id)
+}
+
+#[tauri::command]
+fn add_outline_chapter(state: State<AppState>, phase_id: String, name: String) -> Result<String, String> {
+    let handler = ensure_handler(&state)?;
+    let chapters = crud::list_outline_chapters(&handler.conn, &phase_id).map_err(|e| e.to_string())?;
+    let sort = chapters.iter().map(|c| c.sort).max().unwrap_or(-1) + 1;
+    let id = uuid::Uuid::new_v4().to_string();
+    let cmd = DataCommand::CreateOutlineChapter {
+        id: id.clone(), phase_id, sort, chapter_name: name,
+        content: String::new(), hook: String::new(),
+    };
+    handler.execute(cmd).map_err(|e| e.to_string())?;
+    Ok(id)
+}
+
+#[tauri::command]
+fn add_character(state: State<AppState>, name: String, char_type: i32, age: i32, relationship: String) -> Result<String, String> {
+    let handler = ensure_handler(&state)?;
+    let novel_id = active_novel_id(&handler.conn)?;
+    let id = uuid::Uuid::new_v4().to_string();
+    let cmd = DataCommand::CreateCharacter { id: id.clone(), novel_id, name, char_type, age, relationship };
+    handler.execute(cmd).map_err(|e| e.to_string())?;
+    Ok(id)
+}
+
 // ─── App Entry ───
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -306,6 +344,7 @@ pub fn run() {
             get_outline, get_chapter, save_chapter,
             agent_chat, get_stats, list_characters, get_setting,
             list_samples, get_plugin,
+            add_outline_phase, add_outline_chapter, add_character,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -26,6 +26,9 @@
   let sidebarTab = $state<'outline' | 'characters' | 'setting' | 'samples'>('outline');
   let eventUnlisten: (() => void) | null = null;
   let showShortcuts = $state(false);
+  let showAddChar = $state(false);
+  let newCharName = $state('');
+  let newCharType = $state(2);
 
   onMount(async () => {
     eventUnlisten = await listen<any>('llm-event', (event) => {
@@ -151,6 +154,15 @@
   async function refreshOutline() {
     try { outline = await invoke<any>('get_outline'); } catch {}
   }
+
+  async function handleAddCharacter() {
+    if (!newCharName.trim()) return;
+    try {
+      await invoke('add_character', { name: newCharName.trim(), charType: newCharType, age: 0, relationship: '' });
+      newCharName = ''; showAddChar = false;
+      await refreshCharacters();
+    } catch (e) { agentMessages = [...agentMessages, { role: 'system', content: `添加失败: ${e}` }]; }
+  }
 </script>
 
 <div class="app-layout">
@@ -183,10 +195,22 @@
     <div class="tab-content">
       {#if sidebarTab === 'outline'}
         {#if outline}
-          <ProjectTree outline={outline} onselect={handleSelectChapter} currentChapterId={currentChapterId} />
+          <ProjectTree outline={outline} onselect={handleSelectChapter} currentChapterId={currentChapterId} onrefresh={loadProject} />
         {/if}
       {:else if sidebarTab === 'characters'}
-        <CharacterPanel {characters} />
+        <CharacterPanel {characters} onadd={() => showAddChar = true} />
+        {#if showAddChar}
+          <div class="add-char-form">
+            <input bind:value={newCharName} placeholder="角色名"
+              onkeydown={(e) => e.key === 'Enter' && handleAddCharacter()} />
+            <select bind:value={newCharType}>
+              <option value={0}>男主</option>
+              <option value={1}>女主</option>
+              <option value={2}>其他</option>
+            </select>
+            <button class="btn btn-small" onclick={handleAddCharacter}>添加</button>
+          </div>
+        {/if}
       {:else if sidebarTab === 'setting'}
         <SettingPanel {setting} />
       {:else if sidebarTab === 'samples'}
@@ -277,6 +301,9 @@
   .btn-secondary:hover { background: var(--border); }
   .btn-small { padding: 4px 10px; background: var(--accent); color: white; font-size: 12px; border-radius: 3px; }
   .text-dim { color: var(--text-dim); }
+  .add-char-form { display: flex; gap: 4px; padding: 8px; }
+  .add-char-form input { flex: 1; padding: 4px 8px; background: var(--bg); border: 1px solid var(--border); border-radius: 3px; color: var(--text); font-size: 12px; }
+  .add-char-form select { padding: 4px; background: var(--bg); border: 1px solid var(--border); border-radius: 3px; color: var(--text); font-size: 12px; }
 
   /* Shortcuts */
   .shortcuts-overlay {
