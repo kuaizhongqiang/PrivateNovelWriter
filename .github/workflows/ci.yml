@@ -19,13 +19,16 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: stable-x86_64-pc-windows-gnu
+          toolchain: stable-x86_64-pc-windows-msvc
 
       - name: Cache cargo dependencies
         uses: Swatinem/rust-cache@v2
 
-      - name: Build
-        run: cargo build --verbose
+      - name: Build kernel + CLI
+        run: cargo build -p pnw-kernel -p pnw --verbose
+
+      - name: Build desktop
+        run: cargo build -p pnw-desktop --verbose
 
       - name: Run tests
         run: cargo test --verbose
@@ -38,7 +41,7 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: stable-x86_64-pc-windows-gnu
+          toolchain: stable-x86_64-pc-windows-msvc
           components: clippy, rustfmt
 
       - name: Cache cargo dependencies
@@ -47,5 +50,5 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all --check
 
-      - name: Clippy
-        run: cargo clippy --all-targets -- -D warnings
+      - name: Clippy (kernel + CLI)
+        run: cargo clippy -p pnw-kernel -p pnw --all-targets -- -D warnings
