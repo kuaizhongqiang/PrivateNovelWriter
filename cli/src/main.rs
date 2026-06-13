@@ -77,6 +77,34 @@ enum Commands {
     },
     /// 全局进度统计
     Status,
+    /// 创作命令：写正文 (Agent B)
+    Chapter {
+        #[command(subcommand)]
+        action: ChapterAgentCommands,
+    },
+    /// 创作命令：评估正文 (Agent B)
+    Evaluate {
+        /// 正文章节 ID
+        id: String,
+    },
+}
+
+// ─── Agent-level Chapter Commands ───
+
+#[derive(Subcommand)]
+enum ChapterAgentCommands {
+    /// 写正文 (Agent B 读大纲+角色 → LLM 生成 → 写入)
+    Write {
+        id: String,
+        #[arg(short, long)]
+        btw: String,
+    },
+    /// 修改正文 (Agent B 读原文+反馈 → LLM 修改 → 写入)
+    Revise {
+        id: String,
+        #[arg(short, long)]
+        feedback: String,
+    },
 }
 
 // ─── Novel ───
@@ -316,20 +344,24 @@ enum SampleCommands {
 
 // ─── Main ───
 
-fn main() {
+#[tokio::main]
+async fn main() {
     dotenv::dotenv().ok();
     let cli = Cli::parse();
 
     match &cli.command {
         Commands::Novel { action } => handle_novel(action),
+        // Agent 命令需要异步执行
+        Commands::Chapter { action } => handle_chapter_agent(action).await,
+        Commands::Evaluate { id } => handle_evaluate(id).await,
         other => {
-            // 对于需要项目目录的命令，打开 db 并执行
             let project_path = get_project_path();
             let conn = open_db(&project_path).expect("Cannot open project database");
             let mut handler = Handler::new(conn, project_path);
 
             let result = match other {
                 Commands::Novel { .. } => unreachable!(),
+                Commands::Chapter { .. } | Commands::Evaluate { .. } => unreachable!(),
                 Commands::Setting { action } => handle_setting(&mut handler, action),
                 Commands::Character { action } => handle_character(&mut handler, action),
                 Commands::Plugin { action } => handle_plugin(&mut handler, action),
@@ -341,7 +373,6 @@ fn main() {
 
             match result {
                 Ok(output) => {
-                    // Status 已经自己在 handler 里打印了
                     if !matches!(other, Commands::Status { .. }) {
                         print_json(&output);
                     }
@@ -777,4 +808,61 @@ fn get_active_novel_id(conn: &rusqlite::Connection) -> String {
     }
     eprintln!("Error: no novels found. Create one with `pnw novel new <name>`");
     std::process::exit(1);
+}
+
+// ─── Agent Command Handlers (async) ───
+
+async fn handle_chapter_agent(cmd: &ChapterAgentCommands) {
+    let project_path = get_project_path();
+    let conn = open_db(&project_path).expect("Cannot open project database");
+    let novel_id = get_active_novel_id(&conn);
+
+    let agent_cmd = match cmd {
+        ChapterAgentCommands::Write { id, btw } => {
+            pnw_kernel::command::agent::AgentCommand::WriteChapter {
+                novel_id,
+                chapter_id: id.clone(),
+                brief: btw.clone(),
+            }
+        }
+        ChapterAgentCommands::Revise { id, feedback } => {
+            pnw_kernel::command::agent::AgentCommand::ReviseChapter {
+                chapter_id: id.clone(),
+                feedback: feedback.clone(),
+            }
+        }
+    };
+
+    match pnw_kernel::agent::execute_agent_command(&conn, &project_path, agent_cmd).await {
+        Ok(summary) => {
+            let result = serde_json::json!({ "status": "ok", "summary": summary });
+            println!("{}", serde_json::to_string_pretty(&result).unwrap());
+        }
+        Err(e) => {
+            let result = serde_json::json!({ "status": "error", "error": e.to_string() });
+            println!("{}", serde_json::to_string_pretty(&result).unwrap());
+            std::process::exit(1);
+        }
+    }
+}
+
+async fn handle_evaluate(id: &str) {
+    let project_path = get_project_path();
+    let conn = open_db(&project_path).expect("Cannot open project database");
+
+    let cmd = pnw_kernel::command::agent::AgentCommand::Evaluate {
+        chapter_id: id.to_string(),
+    };
+
+    match pnw_kernel::agent::execute_agent_command(&conn, &project_path, cmd).await {
+        Ok(summary) => {
+            let result = serde_json::json!({ "status": "ok", "summary": summary });
+            println!("{}", serde_json::to_string_pretty(&result).unwrap());
+        }
+        Err(e) => {
+            let result = serde_json::json!({ "status": "error", "error": e.to_string() });
+            println!("{}", serde_json::to_string_pretty(&result).unwrap());
+            std::process::exit(1);
+        }
+    }
 }
