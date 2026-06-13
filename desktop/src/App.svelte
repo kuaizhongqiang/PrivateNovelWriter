@@ -25,6 +25,7 @@
   let newNovelName = $state('');
   let sidebarTab = $state<'outline' | 'characters' | 'setting' | 'samples'>('outline');
   let eventUnlisten: (() => void) | null = null;
+  let showShortcuts = $state(false);
 
   onMount(async () => {
     eventUnlisten = await listen<any>('llm-event', (event) => {
@@ -41,13 +42,28 @@
         case 'error': lastMsg.content += `\n❌ ${payload.data}`; lastMsg.type = 'error'; agentMessages = [...agentMessages]; break;
       }
     });
+    // Global keyboard shortcuts
+    document.addEventListener('keydown', handleGlobalKeydown);
+
     try {
       const p = await invoke<string | null>('get_project_path');
       if (p) { projectPath = p; await loadProject(); }
     } catch {}
   });
 
-  onDestroy(() => { if (eventUnlisten) eventUnlisten(); });
+  onDestroy(() => {
+    if (eventUnlisten) eventUnlisten();
+    document.removeEventListener('keydown', handleGlobalKeydown);
+  });
+
+  function handleGlobalKeydown(e: KeyboardEvent) {
+    if (e.key === '?' && !e.ctrlKey && !e.metaKey) { showShortcuts = !showShortcuts; e.preventDefault(); }
+    if (e.key === 'Escape' && showShortcuts) { showShortcuts = false; }
+    if ((e.ctrlKey || e.metaKey) && e.key === '1') { sidebarTab = 'outline'; }
+    if ((e.ctrlKey || e.metaKey) && e.key === '2') { sidebarTab = 'characters'; }
+    if ((e.ctrlKey || e.metaKey) && e.key === '3') { sidebarTab = 'setting'; }
+    if ((e.ctrlKey || e.metaKey) && e.key === '4') { sidebarTab = 'samples'; }
+  }
 
   async function loadProject() {
     try {
@@ -202,6 +218,26 @@
   </aside>
 </div>
 
+<!-- Shortcuts Help -->
+{#if showShortcuts}
+  <div class="shortcuts-overlay" onclick={() => showShortcuts = false}>
+    <div class="shortcuts-panel" onclick={(e) => e.stopPropagation()}>
+      <h2>⌨ 快捷键</h2>
+      <div class="shortcut-grid">
+        <div class="sc-group"><h3>全局</h3></div>
+        <span class="sc-key">?</span><span class="sc-desc">打开快捷键帮助</span>
+        <span class="sc-key">Ctrl+1-4</span><span class="sc-desc">切换侧栏 Tab</span>
+        <span class="sc-key">Ctrl+F</span><span class="sc-desc">专注模式</span>
+        <span class="sc-key">Ctrl+S</span><span class="sc-desc">保存</span>
+        <span class="sc-key">Ctrl++/-</span><span class="sc-desc">字体缩放</span>
+        <div class="sc-group"><h3>Agent B</h3></div>
+        <span class="sc-key">Ctrl+Enter</span><span class="sc-desc">发送消息</span>
+      </div>
+      <p class="shortcuts-hint">点击任意处关闭</p>
+    </div>
+  </div>
+{/if}
+
 <style>
   .app-layout { display: grid; grid-template-columns: 260px 1fr 320px; height: 100vh; overflow: hidden; }
   .sidebar { background: var(--bg-secondary); border-right: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; }
@@ -241,4 +277,28 @@
   .btn-secondary:hover { background: var(--border); }
   .btn-small { padding: 4px 10px; background: var(--accent); color: white; font-size: 12px; border-radius: 3px; }
   .text-dim { color: var(--text-dim); }
+
+  /* Shortcuts */
+  .shortcuts-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 100; animation: fadeIn 0.15s ease;
+  }
+  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+  .shortcuts-panel {
+    background: var(--bg-secondary); border: 1px solid var(--border);
+    border-radius: 12px; padding: 24px; max-width: 400px; width: 90%;
+    max-height: 80vh; overflow-y: auto;
+  }
+  .shortcuts-panel h2 { font-size: 18px; margin-bottom: 16px; }
+  .shortcut-grid { display: grid; grid-template-columns: auto 1fr; gap: 8px 16px; align-items: center; }
+  .sc-group { grid-column: 1 / -1; margin-top: 8px; }
+  .sc-group h3 { font-size: 12px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; }
+  .sc-key {
+    font-family: var(--font-mono); font-size: 12px; padding: 3px 8px;
+    background: var(--bg); border: 1px solid var(--border); border-radius: 4px;
+    text-align: center; white-space: nowrap;
+  }
+  .sc-desc { font-size: 13px; }
+  .shortcuts-hint { text-align: center; font-size: 12px; color: var(--text-dim); margin-top: 16px; }
 </style>
