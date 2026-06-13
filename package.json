@@ -1,0 +1,25 @@
+{
+  "name": "private-novel-writer",
+  "version": "0.1.0-alpha",
+  "description": "PrivateNovelWriter - AI-powered novel writing assistant",
+  "bin": {
+    "pnw": "bin/pnw.js"
+  },
+  "files": [
+    "bin/",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "postinstall": "node bin/install.js",
+    "build": "cargo build -p pnw --release"
+  },
+  "keywords": ["novel", "writing", "ai", "cli"],
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kuaizhongqiang/PrivateNovelWriter.git"
+  },
+  "os": ["win32"],
+  "cpu": ["x64"]
+}
