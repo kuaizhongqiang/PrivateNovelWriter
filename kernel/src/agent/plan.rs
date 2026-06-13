@@ -15,15 +15,11 @@ pub async fn execute_plan_outline(
 ) -> Result<String, LlmError> {
     let emit = |name: &str, status: &str| {
         if let Some(sender) = event_sender {
-            let n = name.to_string();
-            let s = status.to_string();
-            let sender = sender.clone();
-            tokio::spawn(async move {
-                let guard = sender.lock().await;
+            if let Ok(guard) = sender.try_lock() {
                 if let Some(ref tx) = *guard {
-                    tx.send(LlmEvent::Step { name: n, status: s }).ok();
+                    let _ = tx.send(LlmEvent::Step { name: name.to_string(), status: status.to_string() });
                 }
-            });
+            }
         }
     };
 
@@ -117,7 +113,7 @@ pub async fn execute_plan_outline(
         let desc = parts[1].trim();
         if raw_name.is_empty() { continue; }
 
-        if raw_name.starts_with("[章]") || raw_name.contains("章") {
+        if raw_name.starts_with("[章]") {
             // 章: [章] 章名 | 概要 | 钩子
             let name = raw_name.trim_start_matches("[章]").trim();
             if let Ok(phases) = crud::list_outline_phases(conn, novel_id) {
@@ -126,12 +122,15 @@ pub async fn execute_plan_outline(
                     let chapters = crud::list_outline_chapters(conn, &last.id).ok();
                     let sort = chapters.as_ref().and_then(|c| c.last().map(|ch| ch.sort + 1)).unwrap_or(0);
                     let hook = parts.get(2).map(|s| s.trim()).unwrap_or("");
-                    crud::create_outline_chapter(conn, &OutlineChapter {
+                    if let Err(e) = crud::create_outline_chapter(conn, &OutlineChapter {
                         id: oc_id, phase_id: last.id.clone(), sort,
                         chapter_name: name.to_string(), content: desc.to_string(),
                         hook: hook.to_string(), text_chapter_id: None,
-                    }).ok();
-                    chapter_count += 1;
+                    }) {
+                        eprintln!("plan: 写入章大纲失败: {}", e);
+                    } else {
+                        chapter_count += 1;
+                    }
                 }
             }
         } else {
@@ -140,11 +139,14 @@ pub async fn execute_plan_outline(
             let phase_id = uuid::Uuid::new_v4().to_string();
             let phases = crud::list_outline_phases(conn, novel_id).ok();
             let sort = phases.as_ref().and_then(|p| p.last().map(|ph| ph.sort + 1)).unwrap_or(0);
-            crud::create_outline_phase(conn, &OutlinePhase {
+            if let Err(e) = crud::create_outline_phase(conn, &OutlinePhase {
                 id: phase_id, novel_id: novel_id.to_string(), sort,
                 name: name.to_string(), description: desc.to_string(),
-            }).ok();
-            phase_count += 1;
+            }) {
+                eprintln!("plan: 写入卷大纲失败: {}", e);
+            } else {
+                phase_count += 1;
+            }
         }
     }
 
