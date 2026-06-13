@@ -36,7 +36,7 @@ pub async fn execute_plan_outline(
 
     let mut system = String::new();
     system.push_str("你是一个专业的小说大纲规划助手。根据小说设定和角色信息，生成详细的大纲。\n\n");
-    system.push_str("输出格式要求:\n- 每卷输出: 卷名 | 描述\n- 每章输出: 章名 | 概要 | 章尾钩子\n- 每章一行，用 | 分隔字段\n\n");
+    system.push_str("输出格式要求:\n- 每卷: [卷] 卷名 | 描述\n- 每章: [章] 章名 | 概要 | 章尾钩子\n- 每行一个，用 | 分隔字段\n\n");
 
     if let Some(ref s) = setting {
         system.push_str(&format!("标题: {}\n简介: {}\n", s.title, s.description));
@@ -115,16 +115,18 @@ pub async fn execute_plan_outline(
         if !line.contains('|') { continue; }
         let parts: Vec<&str> = line.split('|').collect();
         if parts.len() < 2 { continue; }
-        let name = parts[0].trim();
+        let raw_name = parts[0].trim();
         let desc = parts[1].trim();
-        if name.is_empty() { continue; }
+        if raw_name.is_empty() { continue; }
 
-        if name.contains("章") {
+        if raw_name.starts_with("[章]") || raw_name.contains("章") {
+            // 章: [章] 章名 | 概要 | 钩子
+            let name = raw_name.trim_start_matches("[章]").trim();
             if let Ok(phases) = crud::list_outline_phases(conn, novel_id) {
                 if let Some(last) = phases.last() {
                     let oc_id = uuid::Uuid::new_v4().to_string();
                     let chapters = crud::list_outline_chapters(conn, &last.id).ok();
-                    let sort = chapters.map(|c| c.len() as i32).unwrap_or(0);
+                    let sort = chapters.as_ref().and_then(|c| c.last().map(|ch| ch.sort + 1)).unwrap_or(0);
                     let hook = parts.get(2).map(|s| s.trim()).unwrap_or("");
                     crud::create_outline_chapter(conn, &OutlineChapter {
                         id: oc_id, phase_id: last.id.clone(), sort,
@@ -135,9 +137,11 @@ pub async fn execute_plan_outline(
                 }
             }
         } else {
+            // 卷: [卷] 卷名 | 描述
+            let name = raw_name.trim_start_matches("[卷]").trim();
             let phase_id = uuid::Uuid::new_v4().to_string();
             let phases = crud::list_outline_phases(conn, novel_id).ok();
-            let sort = phases.map(|p| p.len() as i32).unwrap_or(0);
+            let sort = phases.as_ref().and_then(|p| p.last().map(|ph| ph.sort + 1)).unwrap_or(0);
             crud::create_outline_phase(conn, &OutlinePhase {
                 id: phase_id, novel_id: novel_id.to_string(), sort,
                 name: name.to_string(), description: desc.to_string(),

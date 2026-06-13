@@ -18,5 +18,6 @@ Thumbs.db
 
 # Node.js
 node_modules/
+desktop/package-lock.json
 desktop/dist/
 desktop/build/

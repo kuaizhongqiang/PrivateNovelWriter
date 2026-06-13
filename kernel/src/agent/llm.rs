@@ -83,7 +83,10 @@ pub struct OpenAiCompatible {
 #[async_trait::async_trait]
 impl LlmProvider for OpenAiCompatible {
     async fn chat(&self, messages: &[Message], tools: &[ToolDef]) -> Result<LlmResponse, LlmError> {
-        let client = reqwest::Client::new();
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(120))
+            .build()
+            .map_err(|e| LlmError::Api(format!("Client build error: {}", e)))?;
         let body = build_request_body(&self.model, messages, tools, false);
 
         let resp = client
@@ -114,7 +117,10 @@ impl LlmProvider for OpenAiCompatible {
         tools: &[ToolDef],
         sender: tokio::sync::mpsc::UnboundedSender<LlmEvent>,
     ) -> Result<(), LlmError> {
-        let client = reqwest::Client::new();
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(120))
+            .build()
+            .map_err(|e| LlmError::Api(format!("Client build error: {}", e)))?;
         let body = build_request_body(&self.model, messages, tools, true);
 
         let resp = client
@@ -136,13 +142,21 @@ impl LlmProvider for OpenAiCompatible {
         }
 
         let mut stream = resp.bytes_stream();
+        let mut buf: Vec<u8> = Vec::new();
         let mut full_content = String::new();
 
         while let Some(chunk) = stream.next().await {
             let chunk = chunk.map_err(|e| LlmError::Stream(e.to_string()))?;
-            let text = String::from_utf8_lossy(&chunk);
+            buf.extend_from_slice(&chunk);
 
-            for line in text.lines() {
+            // 处理缓冲区中所有完整的 SSE 行（以 \n 结尾）
+            // 未完成的部分留在 buf 中等待下一个 chunk
+            let buf_str = std::str::from_utf8(&buf).unwrap_or("");
+            let mut last_newline = 0;
+
+            for (i, _) in buf_str.match_indices('\n') {
+                let line = &buf_str[last_newline..i].trim();
+                last_newline = i + 1;
                 let line = line.trim();
                 if !line.starts_with("data: ") {
                     continue;
@@ -202,8 +216,14 @@ impl LlmProvider for OpenAiCompatible {
                     }
                 }
             }
+            // 移除已处理的行，保留未完成的字节
+            if last_newline > 0 {
+                buf.drain(..last_newline);
+            }
         }
 
+        // 确保 Done 事件发送（即使 API 没发 finish_reason）
+        sender.send(LlmEvent::Done).ok();
         Ok(())
     }
 }
