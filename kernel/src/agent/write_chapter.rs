@@ -17,15 +17,7 @@ pub async fn execute_write_chapter(
     brief: &str,
     event_sender: Option<&Arc<Mutex<Option<tokio::sync::mpsc::UnboundedSender<LlmEvent>>>>>,
 ) -> Result<String, LlmError> {
-    let emit = |name: &str, status: &str| {
-        if let Some(sender) = event_sender {
-            if let Ok(guard) = sender.try_lock() {
-                if let Some(ref tx) = *guard {
-                    let _ = tx.send(LlmEvent::Step { name: name.to_string(), status: status.to_string() });
-                }
-            }
-        }
-    };
+    let emit = super::make_emit(event_sender);
 
     emit("read", "读取正文章节");
 
@@ -34,22 +26,8 @@ pub async fn execute_write_chapter(
         .ok_or_else(|| LlmError::Api(format!("Text chapter {} not found", chapter_id)))?;
 
     emit("read", "读取大纲");
-    let outline_chapter = {
-        let phases = crud::list_outline_phases(conn, novel_id)
-            .map_err(|e| LlmError::Api(format!("DB error: {}", e)))?;
-        let mut found = None;
-        for phase in &phases {
-            let chapters = crud::list_outline_chapters(conn, &phase.id)
-                .map_err(|e| LlmError::Api(format!("DB error: {}", e)))?;
-            for oc in &chapters {
-                if oc.text_chapter_id.as_deref() == Some(chapter_id) {
-                    found = Some((phase.clone(), oc.clone()));
-                    break;
-                }
-            }
-        }
-        found
-    };
+    let outline_chapter = crud::find_outline_chapter_by_text_id(conn, novel_id, chapter_id)
+        .map_err(|e| LlmError::Api(format!("DB error: {}", e)))?;
 
     emit("read", "读取角色和设定");
     let characters = crud::list_characters(conn, novel_id)
