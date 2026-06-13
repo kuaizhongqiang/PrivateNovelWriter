@@ -157,6 +157,37 @@ Agent B 写正文时只读必要数据，不读前面的章节全文：
 
 这样每章的 context 消耗是固定的，写到 200 章也不会膨胀。
 
+### LLM 抽象层
+
+支持切换 API 和本地模型，通过 `LLM_PROVIDER` 环境变量控制：
+
+| 提供商 | 类型 | 配置 |
+|---|---|---|
+| `deepseek` | API | `LLM_API_KEY` + `LLM_MODEL` |
+| `lmstudio` | 本地 (OpenAI 兼容) | `LMSTUDIO_BASE_URL` (默认 `http://localhost:1234/v1`) |
+
+```rust
+#[async_trait]
+pub trait LlmProvider {
+    /// 发送对话请求，返回生成的文本
+    async fn chat(&self, messages: &[Message], tools: &[ToolDef]) -> Result<LlmResponse>;
+}
+
+pub struct DeepSeekProvider { ... }    // → OpenAI 兼容 API
+pub struct LmStudioProvider { ... }   // → 本地 HTTP 服务
+```
+
+两者都是 OpenAI 兼容接口，所以 `DeepSeekProvider` 和 `LmStudioProvider` 共享同一套 HTTP 请求逻辑，只是 base_url 和 api_key 不同。
+
+切换方式：
+```bash
+# 使用 DeepSeek API
+LLM_PROVIDER=deepseek
+
+# 切换到 LM Studio 本地模型
+LLM_PROVIDER=lmstudio
+```
+
 ### Agent B 系统提示词（草案）
 
 ```
