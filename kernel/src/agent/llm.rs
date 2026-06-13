@@ -78,18 +78,15 @@ pub struct OpenAiCompatible {
     pub base_url: String,
     pub api_key: String,
     pub model: String,
+    client: reqwest::Client,
 }
 
 #[async_trait::async_trait]
 impl LlmProvider for OpenAiCompatible {
     async fn chat(&self, messages: &[Message], tools: &[ToolDef]) -> Result<LlmResponse, LlmError> {
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(120))
-            .build()
-            .map_err(|e| LlmError::Api(format!("Client build error: {}", e)))?;
         let body = build_request_body(&self.model, messages, tools, false);
 
-        let resp = client
+        let resp = self.client
             .post(format!("{}/chat/completions", self.base_url.trim_end_matches('/')))
             .header("Authorization", format!("Bearer {}", self.api_key))
             .header("Content-Type", "application/json")
@@ -100,11 +97,7 @@ impl LlmProvider for OpenAiCompatible {
         let status = resp.status();
         if !status.is_success() {
             let error_body = resp.text().await.unwrap_or_default();
-            return Err(LlmError::Api(format!(
-                "API returned {}: {}",
-                status,
-                error_body
-            )));
+            return Err(LlmError::Api(format!("API returned {}: {}", status, error_body)));
         }
 
         let json: serde_json::Value = resp.json().await?;
@@ -118,13 +111,8 @@ impl LlmProvider for OpenAiCompatible {
         tools: &[ToolDef],
         sender: tokio::sync::mpsc::UnboundedSender<LlmEvent>,
     ) -> Result<(), LlmError> {
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(120))
-            .build()
-            .map_err(|e| LlmError::Api(format!("Client build error: {}", e)))?;
         let body = build_request_body(&self.model, messages, tools, true);
-
-        let resp = client
+        let resp = self.client
             .post(format!("{}/chat/completions", self.base_url.trim_end_matches('/')))
             .header("Authorization", format!("Bearer {}", self.api_key))
             .header("Content-Type", "application/json")
@@ -148,7 +136,7 @@ impl LlmProvider for OpenAiCompatible {
 
             // 处理缓冲区中所有完整的 SSE 行（以 \n 结尾）
             // 未完成的部分留在 buf 中等待下一个 chunk
-            let buf_str = std::str::from_utf8(&buf).unwrap_or("");
+            let buf_str = String::from_utf8_lossy(&buf);
             let mut last_newline = 0;
 
             for (i, _) in buf_str.match_indices('\n') {
@@ -305,23 +293,26 @@ pub fn create_provider_from_env() -> Result<Box<dyn LlmProvider>, LlmError> {
                 .unwrap_or_else(|_| "http://localhost:1234/v1".to_string());
             let api_key = std::env::var("LLM_API_KEY").unwrap_or_else(|_| "not-needed".to_string());
             let model = std::env::var("LLM_MODEL").unwrap_or_else(|_| "local-model".to_string());
-            Ok(Box::new(OpenAiCompatible {
-                base_url,
-                api_key,
-                model,
-            }))
+            let client = build_http_client()?;
+            Ok(Box::new(OpenAiCompatible { base_url, api_key, model, client }))
         }
         _ => {
-            let api_key = std::env::var("LLM_API_KEY").map_err(|_| {
-                LlmError::NoProvider
+            let api_key = std::env::var("LLM_API_KEY").map_err(|_| { LlmError::NoProvider
             })?;
             let model =
                 std::env::var("LLM_MODEL").unwrap_or_else(|_| "deepseek-v4-flash".to_string());
+            let client = build_http_client()?;
             Ok(Box::new(OpenAiCompatible {
                 base_url: "https://api.deepseek.com/v1".to_string(),
-                api_key,
-                model,
+                api_key, model, client,
             }))
         }
     }
+}
+
+fn build_http_client() -> Result<reqwest::Client, LlmError> {
+    reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(120))
+        .build()
+        .map_err(|e| LlmError::Api(format!("Client build error: {}", e)))
 }

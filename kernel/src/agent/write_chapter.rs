@@ -19,15 +19,11 @@ pub async fn execute_write_chapter(
 ) -> Result<String, LlmError> {
     let emit = |name: &str, status: &str| {
         if let Some(sender) = event_sender {
-            let n = name.to_string();
-            let s = status.to_string();
-            let sender = sender.clone();
-            tokio::spawn(async move {
-                let guard = sender.lock().await;
+            if let Ok(guard) = sender.try_lock() {
                 if let Some(ref tx) = *guard {
-                    tx.send(LlmEvent::Step { name: n, status: s }).ok();
+                    let _ = tx.send(LlmEvent::Step { name: name.to_string(), status: status.to_string() });
                 }
-            });
+            }
         }
     };
 
@@ -126,14 +122,14 @@ pub async fn execute_write_chapter(
                     match msg {
                         Some(LlmEvent::Token(t)) => {
                             full.push_str(&t);
-                            if let Ok(mut g) = llm_sender.try_lock() {
+                            if let Ok(g) = llm_sender.try_lock() {
                                 if let Some(ref tx) = *g {
                                     tx.send(LlmEvent::Token(t)).ok();
                                 }
                             }
                         }
                         Some(LlmEvent::Thinking(t)) => {
-                            if let Ok(mut g) = llm_sender.try_lock() {
+                            if let Ok(g) = llm_sender.try_lock() {
                                 if let Some(ref tx) = *g {
                                     tx.send(LlmEvent::Thinking(t)).ok();
                                 }

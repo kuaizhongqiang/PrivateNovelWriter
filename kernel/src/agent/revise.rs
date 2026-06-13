@@ -18,15 +18,11 @@ pub async fn execute_revise(
 ) -> Result<String, LlmError> {
     let emit = |name: &str, status: &str| {
         if let Some(sender) = event_sender {
-            let n = name.to_string();
-            let s = status.to_string();
-            let sender = sender.clone();
-            tokio::spawn(async move {
-                let guard = sender.lock().await;
+            if let Ok(guard) = sender.try_lock() {
                 if let Some(ref tx) = *guard {
-                    tx.send(LlmEvent::Step { name: n, status: s }).ok();
+                    let _ = tx.send(LlmEvent::Step { name: name.to_string(), status: status.to_string() });
                 }
-            });
+            }
         }
     };
 

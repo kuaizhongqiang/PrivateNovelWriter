@@ -18,8 +18,48 @@
   let stats = $state<any>(null);
   let showNewNovel = $state(false);
   let newNovelName = $state('');
+  let currentStreamingId = $state<number>(0);
+  let eventUnlisten: (() => void) | null = null;
 
+  // 单一事件监听，组件生命周期内有效
   onMount(async () => {
+    eventUnlisten = await listen<any>('llm-event', (event) => {
+      const payload = event.payload;
+      // 只处理当前活跃消息的事件
+      if (agentMessages.length === 0) return;
+      const lastMsg = agentMessages[agentMessages.length - 1];
+      if (lastMsg.role !== 'assistant') return;
+
+      switch (payload.type) {
+        case 'token':
+          lastMsg.content += payload.data;
+          agentMessages = [...agentMessages];
+          break;
+        case 'thinking':
+          lastMsg.content += `🧠 ${payload.data}`;
+          agentMessages = [...agentMessages];
+          break;
+        case 'step':
+          // 显示步骤状态
+          lastMsg.content += `\n⚙️ ${payload.name}: ${payload.status}`;
+          agentMessages = [...agentMessages];
+          break;
+        case 'tool_call':
+          lastMsg.content += `\n🔧 调用工具: ${payload.name}`;
+          agentMessages = [...agentMessages];
+          break;
+        case 'done':
+          lastMsg.type = 'done';
+          agentMessages = [...agentMessages];
+          break;
+        case 'error':
+          lastMsg.content += `\n❌ ${payload.data}`;
+          lastMsg.type = 'error';
+          agentMessages = [...agentMessages];
+          break;
+      }
+    });
+
     // Try to restore last project
     try {
       const p = await invoke<string | null>('get_project_path');
@@ -28,6 +68,12 @@
         await loadProject();
       }
     } catch {}
+  });
+
+  // 清理事件监听
+  import { onDestroy } from 'svelte';
+  onDestroy(() => {
+    if (eventUnlisten) eventUnlisten();
   });
 
   async function loadProject() {
@@ -107,53 +153,41 @@
     }
   }
 
+  function classifyCommand(msg: string): { commandType: string, chapterId?: string } {
+    const lower = msg.toLowerCase();
+    if (lower.startsWith('/evaluate') || lower.includes('评估') && !lower.includes('大纲')) {
+      return { commandType: 'evaluate' };
+    }
+    if (lower.startsWith('/revise') || lower.includes('修改') || lower.includes('改写')) {
+      return { commandType: 'revise', chapterId: currentChapterId || undefined };
+    }
+    if (lower.startsWith('/plan') || lower.includes('规划') && lower.includes('大纲')) {
+      return { commandType: 'plan' };
+    }
+    return { commandType: 'write' };
+  }
+
   async function handleSendMessage(msg: string) {
     if (!novelId || !msg.trim()) return;
+    const { commandType, chapterId } = classifyCommand(msg);
+    const placeholderId = ++currentStreamingId;
     agentMessages = [...agentMessages, { role: 'user', content: msg }];
-    // Add a placeholder for assistant
-    agentMessages = [...agentMessages, { role: 'assistant', content: '', type: 'streaming' }];
-
-    // Listen for events
-    const unlisten = await listen<any>('llm-event', (event) => {
-      const payload = event.payload;
-      const lastMsg = agentMessages[agentMessages.length - 1];
-
-      switch (payload.type) {
-        case 'token':
-          lastMsg.content += payload.data;
-          agentMessages = [...agentMessages]; // trigger reactivity
-          break;
-        case 'thinking':
-          if (!lastMsg.type) lastMsg.type = 'has-thinking';
-          lastMsg.content += `🧠 ${payload.data}`;
-          agentMessages = [...agentMessages];
-          break;
-      }
-    });
+    agentMessages = [...agentMessages, { role: 'assistant', content: '', type: 'streaming', _id: placeholderId }];
 
     try {
       const summary = await invoke<string>('agent_chat', {
-        novelId,
+        commandType,
+        chapterId: chapterId || null,
         message: msg,
       });
-      // Replace placeholder with final message
-      agentMessages[agentMessages.length - 1] = {
-        role: 'assistant',
-        content: summary,
-        type: 'done',
-      };
+      agentMessages[agentMessages.length - 1] = { role: 'assistant', content: summary, type: 'done' };
       agentMessages = [...agentMessages];
       await refreshOutline();
       await refreshStats();
     } catch (e) {
-      agentMessages[agentMessages.length - 1] = {
-        role: 'assistant',
-        content: `错误: ${e}`,
-        type: 'error',
-      };
+      agentMessages[agentMessages.length - 1] = { role: 'assistant', content: `错误: ${e}`, type: 'error' };
       agentMessages = [...agentMessages];
     }
-    unlisten();
   }
 </script>
 
