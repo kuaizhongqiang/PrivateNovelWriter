@@ -98,15 +98,16 @@ impl LlmProvider for OpenAiCompatible {
             .await?;
 
         let status = resp.status();
-        let json: serde_json::Value = resp.json().await?;
-
         if !status.is_success() {
+            let error_body = resp.text().await.unwrap_or_default();
             return Err(LlmError::Api(format!(
                 "API returned {}: {}",
                 status,
-                json.get("error").map(|e| e.to_string()).unwrap_or_default()
+                error_body
             )));
         }
+
+        let json: serde_json::Value = resp.json().await?;
 
         extract_response(json)
     }
@@ -133,12 +134,8 @@ impl LlmProvider for OpenAiCompatible {
 
         let status = resp.status();
         if !status.is_success() {
-            let json: serde_json::Value = resp.json().await?;
-            return Err(LlmError::Api(format!(
-                "API returned {}: {}",
-                status,
-                json.get("error").map(|e| e.to_string()).unwrap_or_default()
-            )));
+            let error_body = resp.text().await.unwrap_or_default();
+            return Err(LlmError::Api(format!("API returned {}: {}", status, error_body)));
         }
 
         let mut stream = resp.bytes_stream();

@@ -20,7 +20,7 @@ pub async fn execute_agent_command(
     cmd: AgentCommand,
 ) -> Result<String, LlmError> {
     let llm = create_provider_from_env()?;
-    let novel_id = get_active_novel_id(conn);
+    let novel_id = get_active_novel_id(conn)?;
 
     match cmd {
         AgentCommand::WriteChapter { chapter_id, brief, .. } => {
@@ -54,7 +54,7 @@ pub async fn execute_agent_command_stream(
     sender: tokio::sync::mpsc::UnboundedSender<LlmEvent>,
 ) -> Result<String, LlmError> {
     let llm = create_provider_from_env()?;
-    let novel_id = get_active_novel_id(conn);
+    let novel_id = get_active_novel_id(conn)?;
     let sender = Arc::new(Mutex::new(Some(sender)));
 
     let emit = |name: &str, status: &str| {
@@ -110,17 +110,13 @@ pub async fn execute_agent_command_stream(
     }
 }
 
-fn get_active_novel_id(conn: &Connection) -> String {
+fn get_active_novel_id(conn: &Connection) -> Result<String, LlmError> {
     use crate::db::crud;
-    if let Ok(list) = crud::list_novels(conn) {
-        for novel in &list {
-            if novel.active {
-                return novel.id.clone();
-            }
-        }
-        if let Some(novel) = list.first() {
-            return novel.id.clone();
+    let list = crud::list_novels(conn).map_err(|e| LlmError::Api(format!("DB error: {}", e)))?;
+    for novel in &list {
+        if novel.active {
+            return Ok(novel.id.clone());
         }
     }
-    "unknown".to_string()
+    list.first().map(|n| n.id.clone()).ok_or_else(|| LlmError::Api("No novels found".into()))
 }
