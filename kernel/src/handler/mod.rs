@@ -51,7 +51,7 @@ impl Handler {
         Self { conn, project_path }
     }
 
-    pub fn execute(&mut self, cmd: DataCommand) -> Result<Output, HandlerError> {
+    pub fn execute(&self, cmd: DataCommand) -> Result<Output, HandlerError> {
         match cmd {
             // ── Novel ──
             DataCommand::CreateNovel { id, name, total_char, chapter_char, sensitivity } => {
@@ -228,15 +228,18 @@ impl Handler {
                 Ok(Output::TextChapterList(list))
             }
             DataCommand::UpdateTextChapter { id, name, word_count } => {
-                let c = TextChapter { id: id.clone(), phase_id: String::new(), sort: 0, name, file_path: String::new(), word_count };
+                let mut c = crud::get_text_chapter(&self.conn, &id)?
+                    .ok_or_else(|| HandlerError::NotFound(format!("Text chapter {}", id)))?;
+                c.name = name;
+                c.word_count = word_count;
                 crud::update_text_chapter(&self.conn, &c)?;
                 Ok(Output::Ok)
             }
             DataCommand::DeleteTextChapter { id, file_path } => {
-                // 删 .txt 文件
+                // 先删 DB 记录，再删文件（保证一致性）
+                crud::delete_text_chapter(&self.conn, &id)?;
                 let full_path = self.project_path.join(&file_path);
                 storage::delete_file(&full_path)?;
-                crud::delete_text_chapter(&self.conn, &id)?;
                 Ok(Output::Ok)
             }
 

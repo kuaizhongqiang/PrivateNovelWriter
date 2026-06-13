@@ -88,9 +88,16 @@ pub async fn execute_revise(
         return Err(LlmError::Api("LLM returned empty content".into()));
     }
 
-    emit("write", "保存修改结果");
+    emit("write", "保存修改结果（先备份原文）");
     let trimmed = content.trim().to_string();
     let wc = storage::count_chars(&trimmed);
+
+    // 备份原文
+    if let Ok(orig) = storage::read_text(&full_path) {
+        let bak_path = full_path.with_extension("txt.bak");
+        storage::write_text(&bak_path, &orig).ok();
+    }
+
     storage::write_text(&full_path, &trimmed).map_err(|e| LlmError::Api(format!("IO error: {}", e)))?;
 
     let mut updated = tc;

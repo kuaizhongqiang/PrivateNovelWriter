@@ -432,24 +432,20 @@ fn handle_novel(cmd: &NovelCommands) {
         NovelCommands::Show => {
             let project_path = get_project_path();
             let conn = open_db(&project_path).expect("Cannot open database");
-            let mut handler = Handler::new(conn, project_path);
-            // 需要一个 novel_id，用第一个 active 的
-            if let Ok(list) = crud::list_novels(&handler.conn) {
-                if let Some(novel) = list.into_iter().find(|n| n.active).or_else(|| None) {
-                    if let Ok(output) = handler.execute(DataCommand::GetNovel { id: novel.id }) {
-                        print_json(&output);
-                        return;
-                    }
-                }
+            let handler = Handler::new(conn, project_path);
+            let novel_id = get_active_novel_id(&handler.conn);
+            if let Ok(output) = handler.execute(DataCommand::GetNovel { id: novel_id }) {
+                print_json(&output);
+            } else {
+                eprintln!("Error: could not load novel");
+                std::process::exit(1);
             }
-            eprintln!("Error: no active novel found");
-            std::process::exit(1);
         }
         NovelCommands::Config { name, total_char, chapter_char, sensitivity } => {
             let project_path = get_project_path();
             let conn = open_db(&project_path).expect("Cannot open database");
             let novel_id = get_active_novel_id(&conn);
-            let mut handler = Handler::new(conn, project_path);
+            let handler = Handler::new(conn, project_path);
             let cmd = DataCommand::UpdateNovel {
                 id: novel_id,
                 name: name.clone(),
@@ -640,11 +636,14 @@ fn handle_text(handler: &mut Handler, cmd: &TextCommands) -> Result<Output, pnw_
                     |row| row.get(0),
                 ).unwrap_or_else(|_| "unknown".to_string());
                 let file_path = format!("text/{}/ch-{:03}.txt", phase_name, sort);
-                // Ensure directory exists
                 let full_path = handler.project_path.join(&file_path);
-                std::fs::create_dir_all(full_path.parent().unwrap()).ok();
 
-                // 关联大纲章节
+                // 确保目录存在
+                if let Some(parent) = full_path.parent() {
+                    std::fs::create_dir_all(parent)
+                        .unwrap_or_else(|e| panic!("无法创建目录 {}: {}", parent.display(), e));
+                }
+
                 let cmd = DataCommand::CreateTextChapter {
                     id: id.clone(), phase_id: phase_id.clone(), sort,
                     name: name.clone(), file_path,
@@ -654,8 +653,8 @@ fn handle_text(handler: &mut Handler, cmd: &TextCommands) -> Result<Output, pnw_
                 // 更新大纲章节的 text_chapter_id
                 let outline_chapter_id = from_outline.clone();
                 if let Ok(Some(mut oc)) = crud::get_outline_chapter(&handler.conn, &outline_chapter_id) {
-                    oc.text_chapter_id = Some(id);
-                    crud::update_outline_chapter(&handler.conn, &oc).ok();
+                    oc.text_chapter_id = Some(id.clone());
+                    let _ = crud::update_outline_chapter(&handler.conn, &oc);
                 }
 
                 Ok(Output::Status(format!("Created text chapter: {}", name)))

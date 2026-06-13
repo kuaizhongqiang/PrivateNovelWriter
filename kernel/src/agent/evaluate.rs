@@ -81,5 +81,8 @@ pub async fn execute_evaluate(
         resp.content
     };
 
-    Ok(format!("📊 《{}》评估结果:\n{}", tc.name, result.trim()))
+    if result.trim().is_empty() {
+        return Err(LlmError::Api("LLM returned empty evaluation".into()));
+    }
+    Ok(format!("《{}》评估结果:\n{}", tc.name, result.trim()))
 }
