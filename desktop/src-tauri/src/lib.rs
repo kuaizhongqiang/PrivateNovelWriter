@@ -98,11 +98,10 @@ fn active_novel_id(conn: &rusqlite::Connection) -> Result<String, String> {
 
 #[tauri::command]
 fn get_outline(state: State<AppState>) -> Result<serde_json::Value, String> {
-    let guard = get_conn(&state)?;
-    let conn = guard.as_ref().ok_or("No connection")?;
-    let novel_id = active_novel_id(conn)?;
-    let cmd = DataCommand::GetOutlineTree { novel_id, phase_id: None };
     let handler = ensure_handler(&state)?;
+    // 从 handler 的独立连接获取 novel_id（避免与 cached conn 的锁竞争）
+    let novel_id = active_novel_id(&handler.conn)?;
+    let cmd = DataCommand::GetOutlineTree { novel_id, phase_id: None };
     let output = handler.execute(cmd).map_err(|e| e.to_string())?;
     Ok(serde_json::to_value(output).unwrap_or_default())
 }
@@ -260,40 +259,32 @@ fn get_stats(state: State<AppState>) -> Result<serde_json::Value, String> {
 
 #[tauri::command]
 fn list_characters(state: State<AppState>) -> Result<serde_json::Value, String> {
-    let guard = get_conn(&state)?;
-    let conn = guard.as_ref().ok_or("No connection")?;
-    let novel_id = active_novel_id(conn)?;
     let handler = ensure_handler(&state)?;
+    let novel_id = active_novel_id(&handler.conn)?;
     let output = handler.execute(DataCommand::ListCharacters { novel_id }).map_err(|e| e.to_string())?;
     Ok(serde_json::to_value(output).unwrap_or_default())
 }
 
 #[tauri::command]
 fn get_setting(state: State<AppState>) -> Result<serde_json::Value, String> {
-    let guard = get_conn(&state)?;
-    let conn = guard.as_ref().ok_or("No connection")?;
-    let novel_id = active_novel_id(conn)?;
     let handler = ensure_handler(&state)?;
+    let novel_id = active_novel_id(&handler.conn)?;
     let output = handler.execute(DataCommand::GetSetting { novel_id }).map_err(|e| e.to_string())?;
     Ok(serde_json::to_value(output).unwrap_or_default())
 }
 
 #[tauri::command]
 fn list_samples(state: State<AppState>) -> Result<serde_json::Value, String> {
-    let guard = get_conn(&state)?;
-    let conn = guard.as_ref().ok_or("No connection")?;
-    let novel_id = active_novel_id(conn)?;
     let handler = ensure_handler(&state)?;
+    let novel_id = active_novel_id(&handler.conn)?;
     let output = handler.execute(DataCommand::ListSamples { novel_id }).map_err(|e| e.to_string())?;
     Ok(serde_json::to_value(output).unwrap_or_default())
 }
 
 #[tauri::command]
 fn get_plugin(state: State<AppState>) -> Result<serde_json::Value, String> {
-    let guard = get_conn(&state)?;
-    let conn = guard.as_ref().ok_or("No connection")?;
-    let novel_id = active_novel_id(conn)?;
     let handler = ensure_handler(&state)?;
+    let novel_id = active_novel_id(&handler.conn)?;
     let output = handler.execute(DataCommand::GetPlugin { novel_id }).map_err(|e| e.to_string())?;
     Ok(serde_json::to_value(output).unwrap_or_default())
 }
