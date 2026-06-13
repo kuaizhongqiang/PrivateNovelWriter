@@ -159,47 +159,10 @@ fn agent_chat(
     chapter_id: Option<String>,
     message: String,
 ) -> Result<String, String> {
-    let project_path = state.project_path.lock().unwrap().clone()
-        .ok_or_else(|| "No project opened".to_string())?;
+    // 检查是否有打开的项目
+    let project_path = state.project_path.lock().unwrap().clone();
 
-    // 打开 DB 连接
-    let conn = rusqlite::Connection::open(project_path.join("project.db"))
-        .map_err(|e| format!("DB error: {}", e))?;
-    schema::init_schema(&conn).map_err(|e| format!("Schema error: {}", e))?;
-    let novel_id = active_novel_id(&conn)?;
-
-    // 确定命令类型
-    let cmd = match command_type.as_str() {
-        "evaluate" => {
-            let cid = chapter_id.clone().or_else(|| {
-                let phases = crud::list_text_phases(&conn, &novel_id).ok()?;
-                let p = phases.last()?;
-                let chs = crud::list_text_chapters(&conn, &p.id).ok()?;
-                chs.last().map(|c| c.id.clone())
-            }).ok_or_else(|| "No chapter to evaluate".to_string())?;
-            AgentCommand::Evaluate { chapter_id: cid }
-        }
-        "revise" => {
-            let cid = chapter_id.ok_or_else(|| "chapter_id required for revise".to_string())?;
-            AgentCommand::ReviseChapter { chapter_id: cid, feedback: message }
-        }
-        "plan" => {
-            AgentCommand::PlanOutline { novel_id, brief: message }
-        }
-        _ => { // "write" or default
-            let cid = chapter_id.or_else(|| {
-                let phases = crud::list_outline_phases(&conn, &novel_id).ok()?;
-                phases.iter()
-                    .filter_map(|p| crud::list_outline_chapters(&conn, &p.id).ok())
-                    .flatten()
-                    .find(|oc| oc.text_chapter_id.is_none())
-                    .map(|oc| oc.id.clone())
-            }).ok_or_else(|| "No chapter available".to_string())?;
-            AgentCommand::WriteChapter { novel_id, chapter_id: cid, brief: message }
-        }
-    };
-
-    // 创建事件通道，转发到前端
+    // 事件通道
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<LlmEvent>();
     let app2 = app.clone();
     state.rt.spawn(async move {
@@ -218,8 +181,60 @@ fn agent_chat(
     });
 
     let summary = state.rt.block_on(async {
-        pnw_kernel::agent::execute_agent_command_stream(&conn, &project_path, cmd, tx).await
-    }).map_err(|e| e.to_string())?;
+        let result: Result<String, String> = match project_path {
+            Some(path) => {
+                let conn = rusqlite::Connection::open(path.join("project.db"))
+                    .map_err(|e| format!("DB error: {}", e))?;
+                schema::init_schema(&conn).map_err(|e| format!("Schema error: {}", e))?;
+                let novel_id = active_novel_id(&conn)?;
+
+                let cmd = match command_type.as_str() {
+                    "evaluate" => {
+                        let cid = chapter_id.clone().or_else(|| {
+                            let phases = crud::list_text_phases(&conn, &novel_id).ok()?;
+                            let p = phases.last()?;
+                            let chs = crud::list_text_chapters(&conn, &p.id).ok()?;
+                            chs.last().map(|c| c.id.clone())
+                        }).ok_or_else(|| "No chapter to evaluate".to_string())?;
+                        AgentCommand::Evaluate { chapter_id: cid }
+                    }
+                    "revise" => {
+                        let cid = chapter_id.ok_or_else(|| "chapter_id required".to_string())?;
+                        AgentCommand::ReviseChapter { chapter_id: cid, feedback: message }
+                    }
+                    "plan" => AgentCommand::PlanOutline { novel_id, brief: message },
+                    _ => {
+                        let cid = chapter_id.or_else(|| {
+                            crud::list_outline_phases(&conn, &novel_id).ok()?.iter()
+                                .filter_map(|p| crud::list_outline_chapters(&conn, &p.id).ok())
+                                .flatten()
+                                .find(|oc| oc.text_chapter_id.is_none())
+                                .map(|oc| oc.id.clone())
+                        }).ok_or_else(|| "No chapter available. Create an outline chapter first.".to_string())?;
+                        AgentCommand::WriteChapter { novel_id, chapter_id: cid, brief: message }
+                    }
+                };
+                pnw_kernel::agent::execute_agent_command_stream(&conn, &path, cmd, tx)
+                    .await.map_err(|e| e.to_string())
+            }
+            None => {
+                let llm = pnw_kernel::agent::llm::create_provider_from_env()
+                    .map_err(|e| e.to_string())?;
+                let msgs = vec![
+                    pnw_kernel::agent::llm::Message {
+                        role: "system".to_string(),
+                        content: "你是一个友善的 AI 助手，可以闲聊也可以帮助写作。当前没有打开项目。".to_string(),
+                    },
+                    pnw_kernel::agent::llm::Message {
+                        role: "user".to_string(), content: message,
+                    },
+                ];
+                let resp = llm.chat(&msgs, &[]).await.map_err(|e| e.to_string())?;
+                Ok(resp.content)
+            }
+        };
+        result
+    }).map_err(|e: String| e)?;
 
     Ok(summary)
 }
@@ -331,6 +346,10 @@ fn add_character(state: State<AppState>, name: String, char_type: i32, age: i32,
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Load .env from multiple locations
+    dotenv::dotenv().ok();                       // CWD
+    dotenv::from_filename("../.env").ok();        // parent dir
+    dotenv::from_filename("../../.env").ok();     // grandparent dir
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
