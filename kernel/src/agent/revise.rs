@@ -61,13 +61,11 @@ pub async fn execute_revise(
                     match msg {
                         Some(LlmEvent::Token(t)) => {
                             full.push_str(&t);
-                            let s = llm_sender.clone();
-                            tokio::spawn(async move {
-                                let g = s.lock().await;
+                            if let Ok(g) = llm_sender.try_lock() {
                                 if let Some(ref tx) = *g {
-                                    tx.send(LlmEvent::Token(t)).ok();
+                                    let _ = tx.send(LlmEvent::Token(t));
                                 }
-                            });
+                            }
                         }
                         Some(LlmEvent::Done) | None => break,
                         _ => {}

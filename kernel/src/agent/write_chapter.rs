@@ -126,22 +126,18 @@ pub async fn execute_write_chapter(
                     match msg {
                         Some(LlmEvent::Token(t)) => {
                             full.push_str(&t);
-                            let s = llm_sender.clone();
-                            tokio::spawn(async move {
-                                let g = s.lock().await;
+                            if let Ok(mut g) = llm_sender.try_lock() {
                                 if let Some(ref tx) = *g {
                                     tx.send(LlmEvent::Token(t)).ok();
                                 }
-                            });
+                            }
                         }
                         Some(LlmEvent::Thinking(t)) => {
-                            let s = llm_sender.clone();
-                            tokio::spawn(async move {
-                                let g = s.lock().await;
+                            if let Ok(mut g) = llm_sender.try_lock() {
                                 if let Some(ref tx) = *g {
                                     tx.send(LlmEvent::Thinking(t)).ok();
                                 }
-                            });
+                            }
                         }
                         Some(LlmEvent::Done) | None => break,
                         _ => {}

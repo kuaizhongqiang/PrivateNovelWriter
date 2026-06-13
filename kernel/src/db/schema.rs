@@ -1,4 +1,5 @@
 pub fn init_schema(conn: &rusqlite::Connection) -> rusqlite::Result<()> {
+    conn.execute_batch("PRAGMA foreign_keys = ON;")?;
     conn.execute_batch(
         "
         CREATE TABLE IF NOT EXISTS novel (
