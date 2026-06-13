@@ -2,6 +2,7 @@
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import { onMount, onDestroy } from 'svelte';
+  import Dashboard from './lib/Dashboard.svelte';
   import ProjectTree from './lib/ProjectTree.svelte';
   import Editor from './lib/Editor.svelte';
   import AgentPanel from './lib/AgentPanel.svelte';
@@ -186,15 +187,12 @@
     {/if}
   </aside>
 
-  <!-- Editor -->
+  <!-- Editor / Dashboard -->
   <main class="editor-area">
     {#if currentChapter}
       <Editor chapter={currentChapter} content={chapterContent} onsave={handleSaveContent} />
     {:else}
-      <div class="editor-empty">
-        <p>从左侧选择一个章节开始写作</p>
-        <p class="text-dim">或使用 Agent B 对话生成</p>
-      </div>
+      <Dashboard {stats} {characters} {setting} />
     {/if}
   </main>
 
