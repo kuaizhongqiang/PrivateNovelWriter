@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use clap::{Parser, Subcommand};
 use pnw_kernel::command::data::DataCommand;
@@ -18,7 +18,7 @@ fn get_project_path() -> PathBuf {
     cwd
 }
 
-fn open_db(project_path: &PathBuf) -> rusqlite::Result<rusqlite::Connection> {
+fn open_db(project_path: &Path) -> rusqlite::Result<rusqlite::Connection> {
     let db_path = project_path.join("project.db");
     let conn = rusqlite::Connection::open(&db_path)?;
     schema::init_schema(&conn)?;
