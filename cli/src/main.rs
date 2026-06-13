@@ -373,9 +373,7 @@ async fn main() {
 
             match result {
                 Ok(output) => {
-                    if !matches!(other, Commands::Status { .. }) {
-                        print_json(&output);
-                    }
+                    print_json(&output);
                 }
                 Err(e) => {
                     eprintln!("Error: {}", e);
@@ -702,7 +700,6 @@ fn handle_text(handler: &mut Handler, cmd: &TextCommands) -> Result<Output, pnw_
             TextChapterCommands::Patch { id, old_text, new_text } => {
                 handler.execute(DataCommand::PatchTextChapter {
                     chapter_id: id.clone(),
-                    field: "content".to_string(),
                     old_text: old_text.clone(),
                     new_text: new_text.clone(),
                 })
@@ -788,8 +785,7 @@ fn handle_status(handler: &mut Handler) -> Result<Output, pnw_kernel::handler::H
         "outline_phases": outline_phases.len(),
     });
 
-    println!("{}", serde_json::to_string_pretty(&status).unwrap());
-    Ok(Output::Ok)
+    Ok(Output::StatusJson(status))
 }
 
 // ─── Helpers ───
