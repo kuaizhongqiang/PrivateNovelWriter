@@ -15,3 +15,8 @@ Cargo.lock
 # OS
 .DS_Store
 Thumbs.db
+
+# Node.js
+node_modules/
+desktop/dist/
+desktop/build/
