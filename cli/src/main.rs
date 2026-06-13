@@ -32,7 +32,8 @@ fn print_json<T: serde::Serialize>(val: &T) {
 /// 检查 npm 更新（1 天缓存）
 async fn check_update() {
     const CURRENT: &str = env!("CARGO_PKG_VERSION");
-    let home = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE"))
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
         .unwrap_or_else(|_| ".".to_string());
     let cache_file = std::path::PathBuf::from(home).join(".pnw-update");
     let now = std::time::SystemTime::now()
@@ -52,11 +53,13 @@ async fn check_update() {
     // 异步查 npm registry
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(5))
-        .build().ok();
+        .build()
+        .ok();
     if let Some(client) = client {
         if let Ok(resp) = client
             .get("https://registry.npmjs.org/private-novel-writer/latest")
-            .send().await
+            .send()
+            .await
         {
             if let Ok(json) = resp.json::<serde_json::Value>().await {
                 if let Some(latest) = json["version"].as_str() {
@@ -160,13 +163,9 @@ enum ChapterAgentCommands {
 #[derive(Subcommand)]
 enum NovelCommands {
     /// 新建小说项目
-    New {
-        name: String,
-    },
+    New { name: String },
     /// 打开已有项目
-    Open {
-        path: String,
-    },
+    Open { path: String },
     /// 列出所有小说
     List,
     /// 查看小说的详细信息
@@ -282,7 +281,11 @@ enum OutlineCommands {
 #[derive(Subcommand)]
 enum OutlinePhaseCommands {
     /// 添加卷
-    Add { name: String, #[arg(long)] description: Option<String> },
+    Add {
+        name: String,
+        #[arg(long)]
+        description: Option<String>,
+    },
     /// 列出卷
     List,
     /// 删除卷
@@ -448,9 +451,13 @@ fn handle_novel(cmd: &NovelCommands) {
 
             use pnw_kernel::models::{Novel, Sensitivity};
             let novel = Novel {
-                id: id.clone(), name: name.clone(),
-                created: now.clone(), modified: now,
-                active: true, total_char: 0, chapter_char: 2000,
+                id: id.clone(),
+                name: name.clone(),
+                created: now.clone(),
+                modified: now,
+                active: true,
+                total_char: 0,
+                chapter_char: 2000,
                 sensitivity: Sensitivity::Normal,
             };
             crud::create_novel(&conn, &novel).expect("Cannot create novel");
@@ -490,7 +497,12 @@ fn handle_novel(cmd: &NovelCommands) {
                 std::process::exit(1);
             }
         }
-        NovelCommands::Config { name, total_char, chapter_char, sensitivity } => {
+        NovelCommands::Config {
+            name,
+            total_char,
+            chapter_char,
+            sensitivity,
+        } => {
             let project_path = get_project_path();
             let conn = open_db(&project_path).expect("Cannot open database");
             let novel_id = get_active_novel_id(&conn);
@@ -510,24 +522,48 @@ fn handle_novel(cmd: &NovelCommands) {
 
 // ─── Setting handlers ───
 
-fn handle_setting(handler: &mut Handler, cmd: &SettingCommands) -> Result<Output, pnw_kernel::handler::HandlerError> {
+fn handle_setting(
+    handler: &mut Handler,
+    cmd: &SettingCommands,
+) -> Result<Output, pnw_kernel::handler::HandlerError> {
     let novel_id = get_active_novel_id(&handler.conn);
     match cmd {
-        SettingCommands::Show => {
-            handler.execute(DataCommand::GetSetting { novel_id })
-        }
-        SettingCommands::Update { title, inspiration, description, novel_type, tags } => {
+        SettingCommands::Show => handler.execute(DataCommand::GetSetting { novel_id }),
+        SettingCommands::Update {
+            title,
+            inspiration,
+            description,
+            novel_type,
+            tags,
+        } => {
             // 先读现有 setting
             let existing = crud::get_setting(&handler.conn, &novel_id).ok().flatten();
-            let t = title.clone().unwrap_or(existing.as_ref().map_or(String::new(), |s| s.title.clone()));
-            let i = inspiration.clone().unwrap_or(existing.as_ref().map_or(String::new(), |s| s.inspiration.clone()));
-            let d = description.clone().unwrap_or(existing.as_ref().map_or(String::new(), |s| s.description.clone()));
+            let t = title
+                .clone()
+                .unwrap_or(existing.as_ref().map_or(String::new(), |s| s.title.clone()));
+            let i = inspiration.clone().unwrap_or(
+                existing
+                    .as_ref()
+                    .map_or(String::new(), |s| s.inspiration.clone()),
+            );
+            let d = description.clone().unwrap_or(
+                existing
+                    .as_ref()
+                    .map_or(String::new(), |s| s.description.clone()),
+            );
             let nt = novel_type.unwrap_or(existing.as_ref().map_or(0, |s| s.novel_type.to_i32()));
-            let tg: Vec<String> = tags.as_ref().map(|s| serde_json::from_str(s).unwrap_or_default())
+            let tg: Vec<String> = tags
+                .as_ref()
+                .map(|s| serde_json::from_str(s).unwrap_or_default())
                 .unwrap_or_else(|| existing.as_ref().map_or(vec![], |s| s.tags.clone()));
 
             handler.execute(DataCommand::WriteSetting {
-                novel_id, title: t, inspiration: i, description: d, novel_type: nt, tags: tg,
+                novel_id,
+                title: t,
+                inspiration: i,
+                description: d,
+                novel_type: nt,
+                tags: tg,
             })
         }
     }
@@ -535,27 +571,46 @@ fn handle_setting(handler: &mut Handler, cmd: &SettingCommands) -> Result<Output
 
 // ─── Character handlers ───
 
-fn handle_character(handler: &mut Handler, cmd: &CharacterCommands) -> Result<Output, pnw_kernel::handler::HandlerError> {
+fn handle_character(
+    handler: &mut Handler,
+    cmd: &CharacterCommands,
+) -> Result<Output, pnw_kernel::handler::HandlerError> {
     let novel_id = get_active_novel_id(&handler.conn);
     match cmd {
-        CharacterCommands::Add { name, char_type, age, relationship } => {
+        CharacterCommands::Add {
+            name,
+            char_type,
+            age,
+            relationship,
+        } => {
             let id = uuid::Uuid::new_v4().to_string();
             handler.execute(DataCommand::CreateCharacter {
-                id, novel_id,
-                name: name.clone(), char_type: *char_type, age: *age,
+                id,
+                novel_id,
+                name: name.clone(),
+                char_type: *char_type,
+                age: *age,
                 relationship: relationship.clone(),
             })
         }
-        CharacterCommands::List => {
-            handler.execute(DataCommand::ListCharacters { novel_id })
-        }
+        CharacterCommands::List => handler.execute(DataCommand::ListCharacters { novel_id }),
         CharacterCommands::Get { id } => {
             handler.execute(DataCommand::GetCharacter { id: id.clone() })
         }
-        CharacterCommands::Update { id, name, char_type, age, relationship } => {
+        CharacterCommands::Update {
+            id,
+            name,
+            char_type,
+            age,
+            relationship,
+        } => {
             // 先读现有
-            let existing = crud::get_character(&handler.conn, id).ok().flatten()
-                .ok_or_else(|| pnw_kernel::handler::HandlerError::NotFound(format!("Character {}", id)))?;
+            let existing = crud::get_character(&handler.conn, id)
+                .ok()
+                .flatten()
+                .ok_or_else(|| {
+                    pnw_kernel::handler::HandlerError::NotFound(format!("Character {}", id))
+                })?;
             handler.execute(DataCommand::UpdateCharacter {
                 id: id.clone(),
                 novel_id: existing.novel_id,
@@ -573,34 +628,43 @@ fn handle_character(handler: &mut Handler, cmd: &CharacterCommands) -> Result<Ou
 
 // ─── Plugin handlers ───
 
-fn handle_plugin(handler: &mut Handler, cmd: &PluginCommands) -> Result<Output, pnw_kernel::handler::HandlerError> {
+fn handle_plugin(
+    handler: &mut Handler,
+    cmd: &PluginCommands,
+) -> Result<Output, pnw_kernel::handler::HandlerError> {
     let novel_id = get_active_novel_id(&handler.conn);
     match cmd {
-        PluginCommands::Show => {
-            handler.execute(DataCommand::GetPlugin { novel_id })
-        }
-        PluginCommands::Set { name, plugin_type, description, benefit, cost } => {
-            handler.execute(DataCommand::WritePlugin {
-                novel_id,
-                name: name.clone(), plugin_type: *plugin_type,
-                description: description.clone(),
-                benefit: benefit.clone(), cost: cost.clone(),
-            })
-        }
-        PluginCommands::Delete => {
-            handler.execute(DataCommand::DeletePlugin { novel_id })
-        }
+        PluginCommands::Show => handler.execute(DataCommand::GetPlugin { novel_id }),
+        PluginCommands::Set {
+            name,
+            plugin_type,
+            description,
+            benefit,
+            cost,
+        } => handler.execute(DataCommand::WritePlugin {
+            novel_id,
+            name: name.clone(),
+            plugin_type: *plugin_type,
+            description: description.clone(),
+            benefit: benefit.clone(),
+            cost: cost.clone(),
+        }),
+        PluginCommands::Delete => handler.execute(DataCommand::DeletePlugin { novel_id }),
     }
 }
 
 // ─── Outline handlers ───
 
-fn handle_outline(handler: &mut Handler, cmd: &OutlineCommands) -> Result<Output, pnw_kernel::handler::HandlerError> {
+fn handle_outline(
+    handler: &mut Handler,
+    cmd: &OutlineCommands,
+) -> Result<Output, pnw_kernel::handler::HandlerError> {
     let novel_id = get_active_novel_id(&handler.conn);
     match cmd {
-        OutlineCommands::Show => {
-            handler.execute(DataCommand::GetOutlineTree { novel_id, phase_id: None })
-        }
+        OutlineCommands::Show => handler.execute(DataCommand::GetOutlineTree {
+            novel_id,
+            phase_id: None,
+        }),
         OutlineCommands::Phase { action } => match action {
             OutlinePhaseCommands::Add { name, description } => {
                 let id = uuid::Uuid::new_v4().to_string();
@@ -608,8 +672,10 @@ fn handle_outline(handler: &mut Handler, cmd: &OutlineCommands) -> Result<Output
                 let phases = crud::list_outline_phases(&handler.conn, &novel_id)?;
                 let sort = phases.iter().map(|p| p.sort).max().unwrap_or(-1) + 1;
                 handler.execute(DataCommand::CreateOutlinePhase {
-                    id, novel_id,
-                    sort, name: name.clone(),
+                    id,
+                    novel_id,
+                    sort,
+                    name: name.clone(),
                     description: description.clone().unwrap_or_default(),
                 })
             }
@@ -617,24 +683,35 @@ fn handle_outline(handler: &mut Handler, cmd: &OutlineCommands) -> Result<Output
                 handler.execute(DataCommand::ListOutlinePhases { novel_id })
             }
             OutlinePhaseCommands::Delete { id } => {
-                handler.execute(DataCommand::DeleteOutlinePhase { phase_id: id.clone() })
+                handler.execute(DataCommand::DeleteOutlinePhase {
+                    phase_id: id.clone(),
+                })
             }
         },
         OutlineCommands::Chapter { action } => match action {
-            OutlineChapterCommands::Add { phase_id, name, content, hook } => {
+            OutlineChapterCommands::Add {
+                phase_id,
+                name,
+                content,
+                hook,
+            } => {
                 let id = uuid::Uuid::new_v4().to_string();
                 // 获取当前最大 sort
                 let chapters = crud::list_outline_chapters(&handler.conn, phase_id)?;
                 let sort = chapters.iter().map(|c| c.sort).max().unwrap_or(-1) + 1;
                 handler.execute(DataCommand::CreateOutlineChapter {
-                    id, phase_id: phase_id.clone(), sort,
+                    id,
+                    phase_id: phase_id.clone(),
+                    sort,
                     chapter_name: name.clone(),
                     content: content.clone().unwrap_or_default(),
                     hook: hook.clone().unwrap_or_default(),
                 })
             }
             OutlineChapterCommands::List { phase_id } => {
-                handler.execute(DataCommand::ListOutlineChapters { phase_id: phase_id.clone() })
+                handler.execute(DataCommand::ListOutlineChapters {
+                    phase_id: phase_id.clone(),
+                })
             }
             OutlineChapterCommands::Get { id } => {
                 handler.execute(DataCommand::GetOutlineChapter { id: id.clone() })
@@ -642,48 +719,70 @@ fn handle_outline(handler: &mut Handler, cmd: &OutlineCommands) -> Result<Output
             OutlineChapterCommands::Delete { id } => {
                 handler.execute(DataCommand::DeleteOutlineChapter { id: id.clone() })
             }
-            OutlineChapterCommands::Patch { id, field, old_text, new_text } => {
-                handler.execute(DataCommand::PatchOutlineChapter {
-                    chapter_id: id.clone(),
-                    field: field.clone(),
-                    old_text: old_text.clone(),
-                    new_text: new_text.clone(),
-                })
-            }
+            OutlineChapterCommands::Patch {
+                id,
+                field,
+                old_text,
+                new_text,
+            } => handler.execute(DataCommand::PatchOutlineChapter {
+                chapter_id: id.clone(),
+                field: field.clone(),
+                old_text: old_text.clone(),
+                new_text: new_text.clone(),
+            }),
         },
     }
 }
 
 // ─── Text handlers ───
 
-fn handle_text(handler: &mut Handler, cmd: &TextCommands) -> Result<Output, pnw_kernel::handler::HandlerError> {
+fn handle_text(
+    handler: &mut Handler,
+    cmd: &TextCommands,
+) -> Result<Output, pnw_kernel::handler::HandlerError> {
     match cmd {
         TextCommands::Phase { action } => match action {
-            TextPhaseCommands::Create { novel_id, name, sort } => {
+            TextPhaseCommands::Create {
+                novel_id,
+                name,
+                sort,
+            } => {
                 let id = uuid::Uuid::new_v4().to_string();
                 handler.execute(DataCommand::CreateTextPhase {
-                    id, novel_id: novel_id.clone(), sort: *sort, name: name.clone(),
+                    id,
+                    novel_id: novel_id.clone(),
+                    sort: *sort,
+                    name: name.clone(),
                 })
             }
-            TextPhaseCommands::List { novel_id } => {
-                handler.execute(DataCommand::ListTextPhases { novel_id: novel_id.clone() })
-            }
+            TextPhaseCommands::List { novel_id } => handler.execute(DataCommand::ListTextPhases {
+                novel_id: novel_id.clone(),
+            }),
             TextPhaseCommands::Delete { phase_id } => {
-                handler.execute(DataCommand::DeleteTextPhase { phase_id: phase_id.clone() })
+                handler.execute(DataCommand::DeleteTextPhase {
+                    phase_id: phase_id.clone(),
+                })
             }
         },
         TextCommands::Chapter { action } => match action {
-            TextChapterCommands::Create { phase_id, from_outline, name } => {
+            TextChapterCommands::Create {
+                phase_id,
+                from_outline,
+                name,
+            } => {
                 let id = uuid::Uuid::new_v4().to_string();
                 let chapters = crud::list_text_chapters(&handler.conn, phase_id)?;
                 let sort = chapters.iter().map(|c| c.sort).max().unwrap_or(-1) + 1;
 
                 // 从 text_phase 表取卷名用于构建文件路径
-                let phase_name: String = handler.conn.query_row(
-                    "SELECT name FROM text_phase WHERE id = ?1",
-                    rusqlite::params![phase_id],
-                    |row| row.get(0),
-                ).unwrap_or_else(|_| "unknown".to_string());
+                let phase_name: String = handler
+                    .conn
+                    .query_row(
+                        "SELECT name FROM text_phase WHERE id = ?1",
+                        rusqlite::params![phase_id],
+                        |row| row.get(0),
+                    )
+                    .unwrap_or_else(|_| "unknown".to_string());
                 let file_path = format!("text/{}/ch-{:03}.txt", phase_name, sort);
                 let full_path = handler.project_path.join(&file_path);
 
@@ -694,14 +793,19 @@ fn handle_text(handler: &mut Handler, cmd: &TextCommands) -> Result<Output, pnw_
                 }
 
                 let cmd = DataCommand::CreateTextChapter {
-                    id: id.clone(), phase_id: phase_id.clone(), sort,
-                    name: name.clone(), file_path,
+                    id: id.clone(),
+                    phase_id: phase_id.clone(),
+                    sort,
+                    name: name.clone(),
+                    file_path,
                 };
                 handler.execute(cmd)?;
 
                 // 更新大纲章节的 text_chapter_id
                 let outline_chapter_id = from_outline.clone();
-                if let Ok(Some(mut oc)) = crud::get_outline_chapter(&handler.conn, &outline_chapter_id) {
+                if let Ok(Some(mut oc)) =
+                    crud::get_outline_chapter(&handler.conn, &outline_chapter_id)
+                {
                     oc.text_chapter_id = Some(id.clone());
                     let _ = crud::update_outline_chapter(&handler.conn, &oc);
                 }
@@ -711,7 +815,9 @@ fn handle_text(handler: &mut Handler, cmd: &TextCommands) -> Result<Output, pnw_
             TextChapterCommands::Write { id, file, text } => {
                 let content = if let Some(f) = file {
                     std::fs::read_to_string(f).map_err(|e| {
-                        pnw_kernel::handler::HandlerError::Storage(pnw_kernel::storage::StorageError::Io(e))
+                        pnw_kernel::handler::HandlerError::Storage(
+                            pnw_kernel::storage::StorageError::Io(e),
+                        )
                     })?
                 } else if let Some(t) = text {
                     t.clone()
@@ -722,8 +828,9 @@ fn handle_text(handler: &mut Handler, cmd: &TextCommands) -> Result<Output, pnw_
                     buf
                 };
 
-                let tc = crud::get_text_chapter(&handler.conn, id)?
-                    .ok_or_else(|| pnw_kernel::handler::HandlerError::NotFound(format!("Text chapter {}", id)))?;
+                let tc = crud::get_text_chapter(&handler.conn, id)?.ok_or_else(|| {
+                    pnw_kernel::handler::HandlerError::NotFound(format!("Text chapter {}", id))
+                })?;
 
                 let full_path = handler.project_path.join(&tc.file_path);
                 storage::write_text(&full_path, &content)?;
@@ -733,28 +840,40 @@ fn handle_text(handler: &mut Handler, cmd: &TextCommands) -> Result<Output, pnw_
                 updated.word_count = wc;
                 crud::update_text_chapter(&handler.conn, &updated)?;
 
-                Ok(Output::Status(format!("Written {} chars to chapter {}", wc, id)))
+                Ok(Output::Status(format!(
+                    "Written {} chars to chapter {}",
+                    wc, id
+                )))
             }
             TextChapterCommands::Read { id } => {
-                let tc = crud::get_text_chapter(&handler.conn, id)?
-                    .ok_or_else(|| pnw_kernel::handler::HandlerError::NotFound(format!("Text chapter {}", id)))?;
+                let tc = crud::get_text_chapter(&handler.conn, id)?.ok_or_else(|| {
+                    pnw_kernel::handler::HandlerError::NotFound(format!("Text chapter {}", id))
+                })?;
                 let full_path = handler.project_path.join(&tc.file_path);
                 let content = storage::read_text(&full_path)?;
-                Ok(Output::TextChapterWithContent { chapter: tc, content })
-            }
-            TextChapterCommands::List { phase_id } => {
-                handler.execute(DataCommand::ListTextChapters { phase_id: phase_id.clone() })
-            }
-            TextChapterCommands::Patch { id, old_text, new_text } => {
-                handler.execute(DataCommand::PatchTextChapter {
-                    chapter_id: id.clone(),
-                    old_text: old_text.clone(),
-                    new_text: new_text.clone(),
+                Ok(Output::TextChapterWithContent {
+                    chapter: tc,
+                    content,
                 })
             }
+            TextChapterCommands::List { phase_id } => {
+                handler.execute(DataCommand::ListTextChapters {
+                    phase_id: phase_id.clone(),
+                })
+            }
+            TextChapterCommands::Patch {
+                id,
+                old_text,
+                new_text,
+            } => handler.execute(DataCommand::PatchTextChapter {
+                chapter_id: id.clone(),
+                old_text: old_text.clone(),
+                new_text: new_text.clone(),
+            }),
             TextChapterCommands::Delete { id } => {
-                let tc = crud::get_text_chapter(&handler.conn, id)?
-                    .ok_or_else(|| pnw_kernel::handler::HandlerError::NotFound(format!("Text chapter {}", id)))?;
+                let tc = crud::get_text_chapter(&handler.conn, id)?.ok_or_else(|| {
+                    pnw_kernel::handler::HandlerError::NotFound(format!("Text chapter {}", id))
+                })?;
                 handler.execute(DataCommand::DeleteTextChapter {
                     id: id.clone(),
                     file_path: tc.file_path,
@@ -766,18 +885,22 @@ fn handle_text(handler: &mut Handler, cmd: &TextCommands) -> Result<Output, pnw_
 
 // ─── Sample handlers ───
 
-fn handle_sample(handler: &mut Handler, cmd: &SampleCommands) -> Result<Output, pnw_kernel::handler::HandlerError> {
+fn handle_sample(
+    handler: &mut Handler,
+    cmd: &SampleCommands,
+) -> Result<Output, pnw_kernel::handler::HandlerError> {
     let novel_id = get_active_novel_id(&handler.conn);
     match cmd {
         SampleCommands::Add { title, content } => {
             let id = uuid::Uuid::new_v4().to_string();
             handler.execute(DataCommand::CreateSample {
-                id, novel_id, title: title.clone(), content: content.clone(),
+                id,
+                novel_id,
+                title: title.clone(),
+                content: content.clone(),
             })
         }
-        SampleCommands::List => {
-            handler.execute(DataCommand::ListSamples { novel_id })
-        }
+        SampleCommands::List => handler.execute(DataCommand::ListSamples { novel_id }),
         SampleCommands::Delete { id } => {
             handler.execute(DataCommand::DeleteSample { id: id.clone() })
         }
@@ -788,8 +911,9 @@ fn handle_sample(handler: &mut Handler, cmd: &SampleCommands) -> Result<Output, 
 
 fn handle_status(handler: &mut Handler) -> Result<Output, pnw_kernel::handler::HandlerError> {
     let novel_id = get_active_novel_id(&handler.conn);
-    let novel = crud::get_novel(&handler.conn, &novel_id)?
-        .ok_or_else(|| pnw_kernel::handler::HandlerError::NotFound(format!("Novel {}", novel_id)))?;
+    let novel = crud::get_novel(&handler.conn, &novel_id)?.ok_or_else(|| {
+        pnw_kernel::handler::HandlerError::NotFound(format!("Novel {}", novel_id))
+    })?;
 
     // 统计所有正文章节字数
     let phases = crud::list_text_phases(&handler.conn, &novel_id)?;

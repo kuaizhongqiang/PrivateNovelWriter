@@ -13,12 +13,7 @@ pub enum AgentCommand {
         feedback: String,
     },
     /// 规划大纲：Agent 根据设定+请求规划一卷的章大纲
-    PlanOutline {
-        novel_id: String,
-        brief: String,
-    },
+    PlanOutline { novel_id: String, brief: String },
     /// 评估写作品质
-    Evaluate {
-        chapter_id: String,
-    },
+    Evaluate { chapter_id: String },
 }

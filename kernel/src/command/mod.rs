@@ -1,5 +1,5 @@
-pub mod data;
 pub mod agent;
+pub mod data;
 
 #[derive(Debug, Clone)]
 pub enum Command {

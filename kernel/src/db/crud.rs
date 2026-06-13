@@ -62,7 +62,14 @@ pub fn list_novels(conn: &Connection) -> Result<Vec<Novel>> {
     rows.collect()
 }
 
-pub fn update_novel(conn: &Connection, id: &str, name: Option<&str>, total_char: Option<i32>, chapter_char: Option<i32>, sensitivity: Option<i32>) -> Result<()> {
+pub fn update_novel(
+    conn: &Connection,
+    id: &str,
+    name: Option<&str>,
+    total_char: Option<i32>,
+    chapter_char: Option<i32>,
+    sensitivity: Option<i32>,
+) -> Result<()> {
     let mut sets = Vec::new();
     let mut vals: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
 
@@ -108,8 +115,12 @@ pub fn upsert_setting(conn: &Connection, s: &NovelSetting) -> Result<()> {
            description=excluded.description, novel_type=excluded.novel_type,
            tags_json=excluded.tags_json",
         params![
-            s.novel_id, s.title, s.inspiration, s.description,
-            s.novel_type.to_i32(), serde_json::to_string(&s.tags).unwrap_or_default(),
+            s.novel_id,
+            s.title,
+            s.inspiration,
+            s.description,
+            s.novel_type.to_i32(),
+            serde_json::to_string(&s.tags).unwrap_or_default(),
         ],
     )?;
     Ok(())
@@ -142,7 +153,14 @@ pub fn create_character(conn: &Connection, c: &Character) -> Result<()> {
     conn.execute(
         "INSERT INTO character (id, novel_id, name, char_type, age, relationship)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        params![c.id, c.novel_id, c.name, c.char_type.to_i32(), c.age, c.relationship],
+        params![
+            c.id,
+            c.novel_id,
+            c.name,
+            c.char_type.to_i32(),
+            c.age,
+            c.relationship
+        ],
     )?;
     Ok(())
 }
@@ -205,7 +223,14 @@ pub fn upsert_plugin(conn: &Connection, p: &Plugin) -> Result<()> {
          ON CONFLICT(novel_id) DO UPDATE SET
            name=excluded.name, plugin_type=excluded.plugin_type,
            description=excluded.description, benefit=excluded.benefit, cost=excluded.cost",
-        params![p.novel_id, p.name, p.plugin_type.to_i32(), p.description, p.benefit, p.cost],
+        params![
+            p.novel_id,
+            p.name,
+            p.plugin_type.to_i32(),
+            p.description,
+            p.benefit,
+            p.cost
+        ],
     )?;
     Ok(())
 }
@@ -262,7 +287,10 @@ pub fn list_outline_phases(conn: &Connection, novel_id: &str) -> Result<Vec<Outl
 }
 
 pub fn delete_outline_phase(conn: &Connection, phase_id: &str) -> Result<()> {
-    conn.execute("DELETE FROM outline_chapter WHERE phase_id = ?1", params![phase_id])?;
+    conn.execute(
+        "DELETE FROM outline_chapter WHERE phase_id = ?1",
+        params![phase_id],
+    )?;
     conn.execute("DELETE FROM outline_phase WHERE id = ?1", params![phase_id])?;
     Ok(())
 }
@@ -356,13 +384,20 @@ pub fn find_outline_chapter_by_text_id(
     let mut rows = stmt.query(params![novel_id, text_chapter_id])?;
     if let Some(row) = rows.next()? {
         let oc = OutlineChapter {
-            id: row.get(0)?, phase_id: row.get(1)?, sort: row.get(2)?,
-            chapter_name: row.get(3)?, content: row.get(4)?, hook: row.get(5)?,
+            id: row.get(0)?,
+            phase_id: row.get(1)?,
+            sort: row.get(2)?,
+            chapter_name: row.get(3)?,
+            content: row.get(4)?,
+            hook: row.get(5)?,
             text_chapter_id: row.get(6)?,
         };
         let op = OutlinePhase {
-            id: row.get(7)?, novel_id: row.get(8)?, sort: row.get(9)?,
-            name: row.get(10)?, description: row.get(11)?,
+            id: row.get(7)?,
+            novel_id: row.get(8)?,
+            sort: row.get(9)?,
+            name: row.get(10)?,
+            description: row.get(11)?,
         };
         Ok(Some((op, oc)))
     } else {
@@ -396,7 +431,10 @@ pub fn list_text_phases(conn: &Connection, novel_id: &str) -> Result<Vec<TextPha
 }
 
 pub fn delete_text_phase(conn: &Connection, phase_id: &str) -> Result<()> {
-    conn.execute("DELETE FROM text_chapter WHERE phase_id = ?1", params![phase_id])?;
+    conn.execute(
+        "DELETE FROM text_chapter WHERE phase_id = ?1",
+        params![phase_id],
+    )?;
     conn.execute("DELETE FROM text_phase WHERE id = ?1", params![phase_id])?;
     Ok(())
 }

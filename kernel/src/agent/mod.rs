@@ -1,8 +1,8 @@
-pub mod llm;
-pub mod write_chapter;
-pub mod revise;
-pub mod plan;
 pub mod evaluate;
+pub mod llm;
+pub mod plan;
+pub mod revise;
+pub mod write_chapter;
 
 use std::path::Path;
 use std::sync::Arc;
@@ -10,8 +10,8 @@ use std::sync::Arc;
 use rusqlite::Connection;
 use tokio::sync::Mutex;
 
-use llm::{create_provider_from_env, LlmError, LlmEvent};
 use crate::command::agent::AgentCommand;
+use llm::{create_provider_from_env, LlmError, LlmEvent};
 
 /// 执行创作命令 (Agent B 编排), 非流式
 pub async fn execute_agent_command(
@@ -23,25 +23,39 @@ pub async fn execute_agent_command(
     let novel_id = get_active_novel_id(conn)?;
 
     match cmd {
-        AgentCommand::WriteChapter { chapter_id, brief, .. } => {
+        AgentCommand::WriteChapter {
+            chapter_id, brief, ..
+        } => {
             write_chapter::execute_write_chapter(
-                conn, project_path, llm.as_ref(), &novel_id, &chapter_id, &brief, None,
-            ).await
+                conn,
+                project_path,
+                llm.as_ref(),
+                &novel_id,
+                &chapter_id,
+                &brief,
+                None,
+            )
+            .await
         }
-        AgentCommand::ReviseChapter { chapter_id, feedback } => {
+        AgentCommand::ReviseChapter {
+            chapter_id,
+            feedback,
+        } => {
             revise::execute_revise(
-                conn, project_path, llm.as_ref(), &chapter_id, &feedback, None,
-            ).await
+                conn,
+                project_path,
+                llm.as_ref(),
+                &chapter_id,
+                &feedback,
+                None,
+            )
+            .await
         }
         AgentCommand::PlanOutline { brief, .. } => {
-            plan::execute_plan_outline(
-                conn, llm.as_ref(), &novel_id, &brief, None,
-            ).await
+            plan::execute_plan_outline(conn, llm.as_ref(), &novel_id, &brief, None).await
         }
         AgentCommand::Evaluate { chapter_id } => {
-            evaluate::execute_evaluate(
-                conn, project_path, llm.as_ref(), &chapter_id, None,
-            ).await
+            evaluate::execute_evaluate(conn, project_path, llm.as_ref(), &chapter_id, None).await
         }
     }
 }
@@ -71,29 +85,47 @@ pub async fn execute_agent_command_stream(
 
     // 每个 agent 函数接收 Option<Sender>，有则发流式事件
     match cmd {
-        AgentCommand::WriteChapter { chapter_id, brief, .. } => {
+        AgentCommand::WriteChapter {
+            chapter_id, brief, ..
+        } => {
             emit("write_chapter", "开始写作").await;
             let result = write_chapter::execute_write_chapter(
-                conn, project_path, llm.as_ref(), &novel_id, &chapter_id, &brief, Some(&sender),
-            ).await;
+                conn,
+                project_path,
+                llm.as_ref(),
+                &novel_id,
+                &chapter_id,
+                &brief,
+                Some(&sender),
+            )
+            .await;
             let mut guard = sender.lock().await;
             guard.take(); // 关闭 sender
             result
         }
-        AgentCommand::ReviseChapter { chapter_id, feedback } => {
+        AgentCommand::ReviseChapter {
+            chapter_id,
+            feedback,
+        } => {
             emit("revise", "开始修改").await;
             let result = revise::execute_revise(
-                conn, project_path, llm.as_ref(), &chapter_id, &feedback, Some(&sender),
-            ).await;
+                conn,
+                project_path,
+                llm.as_ref(),
+                &chapter_id,
+                &feedback,
+                Some(&sender),
+            )
+            .await;
             let mut guard = sender.lock().await;
             guard.take();
             result
         }
         AgentCommand::PlanOutline { brief, .. } => {
             emit("plan", "开始规划大纲").await;
-            let result = plan::execute_plan_outline(
-                conn, llm.as_ref(), &novel_id, &brief, Some(&sender),
-            ).await;
+            let result =
+                plan::execute_plan_outline(conn, llm.as_ref(), &novel_id, &brief, Some(&sender))
+                    .await;
             let mut guard = sender.lock().await;
             guard.take();
             result
@@ -101,8 +133,13 @@ pub async fn execute_agent_command_stream(
         AgentCommand::Evaluate { chapter_id } => {
             emit("evaluate", "开始评估").await;
             let result = evaluate::execute_evaluate(
-                conn, project_path, llm.as_ref(), &chapter_id, Some(&sender),
-            ).await;
+                conn,
+                project_path,
+                llm.as_ref(),
+                &chapter_id,
+                Some(&sender),
+            )
+            .await;
             let mut guard = sender.lock().await;
             guard.take();
             result
@@ -112,7 +149,7 @@ pub async fn execute_agent_command_stream(
 
 /// 创建 emit 闭包，供各 agent 模块使用
 pub fn make_emit(
-    event_sender: Option<&Arc<Mutex<Option<tokio::sync::mpsc::UnboundedSender<LlmEvent>>>>>
+    event_sender: Option<&Arc<Mutex<Option<tokio::sync::mpsc::UnboundedSender<LlmEvent>>>>>,
 ) -> impl Fn(&str, &str) + '_ {
     move |name, status| {
         if let Some(sender) = event_sender {
@@ -136,5 +173,7 @@ fn get_active_novel_id(conn: &Connection) -> Result<String, LlmError> {
             return Ok(novel.id.clone());
         }
     }
-    list.first().map(|n| n.id.clone()).ok_or_else(|| LlmError::Api("No novels found".into()))
+    list.first()
+        .map(|n| n.id.clone())
+        .ok_or_else(|| LlmError::Api("No novels found".into()))
 }

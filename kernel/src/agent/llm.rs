@@ -49,7 +49,10 @@ pub enum LlmEvent {
     /// Agent B 正在执行的步骤
     Step { name: String, status: String },
     /// 工具调用
-    ToolCall { name: String, args: serde_json::Value },
+    ToolCall {
+        name: String,
+        args: serde_json::Value,
+    },
     /// 工具调用结果
     ToolResult { name: String, result: String },
     /// 完成
@@ -86,8 +89,12 @@ impl LlmProvider for OpenAiCompatible {
     async fn chat(&self, messages: &[Message], tools: &[ToolDef]) -> Result<LlmResponse, LlmError> {
         let body = build_request_body(&self.model, messages, tools, false);
 
-        let resp = self.client
-            .post(format!("{}/chat/completions", self.base_url.trim_end_matches('/')))
+        let resp = self
+            .client
+            .post(format!(
+                "{}/chat/completions",
+                self.base_url.trim_end_matches('/')
+            ))
             .header("Authorization", format!("Bearer {}", self.api_key))
             .header("Content-Type", "application/json")
             .json(&body)
@@ -97,7 +104,10 @@ impl LlmProvider for OpenAiCompatible {
         let status = resp.status();
         if !status.is_success() {
             let error_body = resp.text().await.unwrap_or_default();
-            return Err(LlmError::Api(format!("API returned {}: {}", status, error_body)));
+            return Err(LlmError::Api(format!(
+                "API returned {}: {}",
+                status, error_body
+            )));
         }
 
         let json: serde_json::Value = resp.json().await?;
@@ -112,8 +122,12 @@ impl LlmProvider for OpenAiCompatible {
         sender: tokio::sync::mpsc::UnboundedSender<LlmEvent>,
     ) -> Result<(), LlmError> {
         let body = build_request_body(&self.model, messages, tools, true);
-        let resp = self.client
-            .post(format!("{}/chat/completions", self.base_url.trim_end_matches('/')))
+        let resp = self
+            .client
+            .post(format!(
+                "{}/chat/completions",
+                self.base_url.trim_end_matches('/')
+            ))
             .header("Authorization", format!("Bearer {}", self.api_key))
             .header("Content-Type", "application/json")
             .json(&body)
@@ -123,7 +137,10 @@ impl LlmProvider for OpenAiCompatible {
         let status = resp.status();
         if !status.is_success() {
             let error_body = resp.text().await.unwrap_or_default();
-            return Err(LlmError::Api(format!("API returned {}: {}", status, error_body)));
+            return Err(LlmError::Api(format!(
+                "API returned {}: {}",
+                status, error_body
+            )));
         }
 
         let mut stream = resp.bytes_stream();
@@ -157,7 +174,10 @@ impl LlmProvider for OpenAiCompatible {
                         let delta = choice.get("delta");
 
                         // 文本 token
-                        if let Some(content) = delta.and_then(|d| d.get("content")).and_then(|c| c.as_str()) {
+                        if let Some(content) = delta
+                            .and_then(|d| d.get("content"))
+                            .and_then(|c| c.as_str())
+                        {
                             if !content.is_empty() {
                                 full_content.push_str(content);
                                 sender.send(LlmEvent::Token(content.to_string())).ok();
@@ -175,12 +195,17 @@ impl LlmProvider for OpenAiCompatible {
                         }
 
                         // 工具调用
-                        if let Some(tool_calls) = delta.and_then(|d| d.get("tool_calls")).and_then(|tc| tc.as_array()) {
+                        if let Some(tool_calls) = delta
+                            .and_then(|d| d.get("tool_calls"))
+                            .and_then(|tc| tc.as_array())
+                        {
                             for tc in tool_calls {
                                 if let Some(name) = tc["function"]["name"].as_str() {
                                     let args = tc["function"]["arguments"]
                                         .as_str()
-                                        .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+                                        .and_then(|s| {
+                                            serde_json::from_str::<serde_json::Value>(s).ok()
+                                        })
                                         .unwrap_or_default();
                                     sender
                                         .send(LlmEvent::ToolCall {
@@ -280,7 +305,10 @@ fn extract_response(json: serde_json::Value) -> Result<LlmResponse, LlmError> {
         })
         .unwrap_or_default();
 
-    Ok(LlmResponse { content, tool_calls })
+    Ok(LlmResponse {
+        content,
+        tool_calls,
+    })
 }
 
 /// 从 .env 环境变量创建 LLM provider
@@ -294,17 +322,23 @@ pub fn create_provider_from_env() -> Result<Box<dyn LlmProvider>, LlmError> {
             let api_key = std::env::var("LLM_API_KEY").unwrap_or_else(|_| "not-needed".to_string());
             let model = std::env::var("LLM_MODEL").unwrap_or_else(|_| "local-model".to_string());
             let client = build_http_client()?;
-            Ok(Box::new(OpenAiCompatible { base_url, api_key, model, client }))
+            Ok(Box::new(OpenAiCompatible {
+                base_url,
+                api_key,
+                model,
+                client,
+            }))
         }
         _ => {
-            let api_key = std::env::var("LLM_API_KEY").map_err(|_| { LlmError::NoProvider
-            })?;
+            let api_key = std::env::var("LLM_API_KEY").map_err(|_| LlmError::NoProvider)?;
             let model =
                 std::env::var("LLM_MODEL").unwrap_or_else(|_| "deepseek-v4-flash".to_string());
             let client = build_http_client()?;
             Ok(Box::new(OpenAiCompatible {
                 base_url: "https://api.deepseek.com/v1".to_string(),
-                api_key, model, client,
+                api_key,
+                model,
+                client,
             }))
         }
     }

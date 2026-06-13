@@ -5,7 +5,7 @@ use crate::db::crud;
 use crate::storage;
 use tokio::sync::Mutex;
 
-use super::llm::{LlmProvider, Message, LlmEvent, LlmError};
+use super::llm::{LlmError, LlmEvent, LlmProvider, Message};
 use rusqlite::Connection;
 
 pub async fn execute_write_chapter(
@@ -43,16 +43,23 @@ pub async fn execute_write_chapter(
 
     // 拼 prompt
     let mut system = String::new();
-    system.push_str("你是一个专业的中长篇小说写作助手。你的职责是根据大纲和设定，生成高质量的正文内容。\n\n");
+    system.push_str(
+        "你是一个专业的中长篇小说写作助手。你的职责是根据大纲和设定，生成高质量的正文内容。\n\n",
+    );
     system.push_str("写作要求:\n- 正文是纯文本，禁止任何 Markdown 或格式标记\n- 段落间用空行分隔\n- 人物行为符合角色设定\n- 对话体现人物性格\n- 情节推进有因果逻辑\n- 章尾留下悬念或钩子\n\n");
 
     if !characters.is_empty() {
         system.push_str("角色列表:\n");
         for c in &characters {
             let role = match c.char_type.to_i32() {
-                0 => "男主", 1 => "女主", _ => "其他",
+                0 => "男主",
+                1 => "女主",
+                _ => "其他",
             };
-            system.push_str(&format!("- {} ({}, {}岁, 关系: {})\n", c.name, role, c.age, c.relationship));
+            system.push_str(&format!(
+                "- {} ({}, {}岁, 关系: {})\n",
+                c.name, role, c.age, c.relationship
+            ));
         }
         system.push('\n');
     }
@@ -66,7 +73,10 @@ pub async fn execute_write_chapter(
     let mut user_prompt = String::new();
     if let Some((ref p, ref oc)) = outline_chapter {
         user_prompt.push_str(&format!("卷: {}\n卷描述: {}\n\n", p.name, p.description));
-        user_prompt.push_str(&format!("章名: {}\n大纲: {}\n", oc.chapter_name, oc.content));
+        user_prompt.push_str(&format!(
+            "章名: {}\n大纲: {}\n",
+            oc.chapter_name, oc.content
+        ));
         if !oc.hook.is_empty() {
             user_prompt.push_str(&format!("本章钩子: {}\n", oc.hook));
         }
@@ -75,12 +85,24 @@ pub async fn execute_write_chapter(
     if let Some(ref p) = phase {
         user_prompt.push_str(&format!("正文所属卷: {}\n", p.name));
     }
-    let target_chars = crud::get_novel(conn, novel_id).ok().flatten().map_or(2000, |n| n.chapter_char as u32);
-    user_prompt.push_str(&format!("\n写作要求: {}\n请生成正文，字数在 {} 字左右。", brief, target_chars));
+    let target_chars = crud::get_novel(conn, novel_id)
+        .ok()
+        .flatten()
+        .map_or(2000, |n| n.chapter_char as u32);
+    user_prompt.push_str(&format!(
+        "\n写作要求: {}\n请生成正文，字数在 {} 字左右。",
+        brief, target_chars
+    ));
 
     let messages = vec![
-        Message { role: "system".to_string(), content: system },
-        Message { role: "user".to_string(), content: user_prompt },
+        Message {
+            role: "system".to_string(),
+            content: system,
+        },
+        Message {
+            role: "user".to_string(),
+            content: user_prompt,
+        },
     ];
 
     emit("llm", "AI 正在生成正文...");
@@ -137,11 +159,13 @@ pub async fn execute_write_chapter(
     storage::ensure_dir(&full_path).map_err(|e| LlmError::Api(format!("IO error: {}", e)))?;
     let trimmed = content.trim().to_string();
     let wc = storage::count_chars(&trimmed);
-    storage::write_text(&full_path, &trimmed).map_err(|e| LlmError::Api(format!("IO error: {}", e)))?;
+    storage::write_text(&full_path, &trimmed)
+        .map_err(|e| LlmError::Api(format!("IO error: {}", e)))?;
 
     let mut updated = tc;
     updated.word_count = wc;
-    crud::update_text_chapter(conn, &updated).map_err(|e| LlmError::Api(format!("DB error: {}", e)))?;
+    crud::update_text_chapter(conn, &updated)
+        .map_err(|e| LlmError::Api(format!("DB error: {}", e)))?;
 
     Ok(format!("生成了《{}》正文，共 {} 字。", updated.name, wc))
 }

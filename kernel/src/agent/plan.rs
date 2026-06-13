@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
-use tokio::sync::Mutex;
-use super::llm::{LlmProvider, Message, LlmEvent, LlmError};
+use super::llm::{LlmError, LlmEvent, LlmProvider, Message};
 use crate::db::crud;
 use crate::models::*;
 use rusqlite::Connection;
+use tokio::sync::Mutex;
 
 pub async fn execute_plan_outline(
     conn: &Connection,
@@ -16,8 +16,10 @@ pub async fn execute_plan_outline(
     let emit = super::make_emit(event_sender);
 
     emit("read", "读取小说设定和角色");
-    let setting = crud::get_setting(conn, novel_id).map_err(|e| LlmError::Api(format!("DB error: {}", e)))?;
-    let characters = crud::list_characters(conn, novel_id).map_err(|e| LlmError::Api(format!("DB error: {}", e)))?;
+    let setting =
+        crud::get_setting(conn, novel_id).map_err(|e| LlmError::Api(format!("DB error: {}", e)))?;
+    let characters = crud::list_characters(conn, novel_id)
+        .map_err(|e| LlmError::Api(format!("DB error: {}", e)))?;
     let novel = crud::get_novel(conn, novel_id)
         .map_err(|e| LlmError::Api(format!("DB error: {}", e)))?
         .ok_or_else(|| LlmError::Api("Novel not found".into()))?;
@@ -36,9 +38,16 @@ pub async fn execute_plan_outline(
     if !characters.is_empty() {
         system.push_str("角色:\n");
         for c in &characters {
-            system.push_str(&format!("- {} ({}): {}\n", c.name,
-                match c.char_type.to_i32() { 0 => "男主", 1 => "女主", _ => "配角" },
-                c.relationship));
+            system.push_str(&format!(
+                "- {} ({}): {}\n",
+                c.name,
+                match c.char_type.to_i32() {
+                    0 => "男主",
+                    1 => "女主",
+                    _ => "配角",
+                },
+                c.relationship
+            ));
         }
         system.push('\n');
     }
@@ -49,8 +58,14 @@ pub async fn execute_plan_outline(
     );
 
     let messages = vec![
-        Message { role: "system".to_string(), content: system },
-        Message { role: "user".to_string(), content: user_prompt },
+        Message {
+            role: "system".to_string(),
+            content: system,
+        },
+        Message {
+            role: "user".to_string(),
+            content: user_prompt,
+        },
     ];
 
     emit("llm", "AI 正在规划大纲...");
@@ -98,12 +113,18 @@ pub async fn execute_plan_outline(
 
     for line in content.lines() {
         let line = line.trim();
-        if !line.contains('|') { continue; }
+        if !line.contains('|') {
+            continue;
+        }
         let parts: Vec<&str> = line.split('|').collect();
-        if parts.len() < 2 { continue; }
+        if parts.len() < 2 {
+            continue;
+        }
         let raw_name = parts[0].trim();
         let desc = parts[1].trim();
-        if raw_name.is_empty() { continue; }
+        if raw_name.is_empty() {
+            continue;
+        }
 
         if raw_name.starts_with("[章]") {
             // 章: [章] 章名 | 概要 | 钩子
@@ -112,13 +133,23 @@ pub async fn execute_plan_outline(
                 if let Some(last) = phases.last() {
                     let oc_id = uuid::Uuid::new_v4().to_string();
                     let chapters = crud::list_outline_chapters(conn, &last.id).ok();
-                    let sort = chapters.as_ref().and_then(|c| c.last().map(|ch| ch.sort + 1)).unwrap_or(0);
+                    let sort = chapters
+                        .as_ref()
+                        .and_then(|c| c.last().map(|ch| ch.sort + 1))
+                        .unwrap_or(0);
                     let hook = parts.get(2).map(|s| s.trim()).unwrap_or("");
-                    if let Err(e) = crud::create_outline_chapter(conn, &OutlineChapter {
-                        id: oc_id, phase_id: last.id.clone(), sort,
-                        chapter_name: name.to_string(), content: desc.to_string(),
-                        hook: hook.to_string(), text_chapter_id: None,
-                    }) {
+                    if let Err(e) = crud::create_outline_chapter(
+                        conn,
+                        &OutlineChapter {
+                            id: oc_id,
+                            phase_id: last.id.clone(),
+                            sort,
+                            chapter_name: name.to_string(),
+                            content: desc.to_string(),
+                            hook: hook.to_string(),
+                            text_chapter_id: None,
+                        },
+                    ) {
                         eprintln!("plan: 写入章大纲失败: {}", e);
                     } else {
                         chapter_count += 1;
@@ -130,11 +161,20 @@ pub async fn execute_plan_outline(
             let name = raw_name.trim_start_matches("[卷]").trim();
             let phase_id = uuid::Uuid::new_v4().to_string();
             let phases = crud::list_outline_phases(conn, novel_id).ok();
-            let sort = phases.as_ref().and_then(|p| p.last().map(|ph| ph.sort + 1)).unwrap_or(0);
-            if let Err(e) = crud::create_outline_phase(conn, &OutlinePhase {
-                id: phase_id, novel_id: novel_id.to_string(), sort,
-                name: name.to_string(), description: desc.to_string(),
-            }) {
+            let sort = phases
+                .as_ref()
+                .and_then(|p| p.last().map(|ph| ph.sort + 1))
+                .unwrap_or(0);
+            if let Err(e) = crud::create_outline_phase(
+                conn,
+                &OutlinePhase {
+                    id: phase_id,
+                    novel_id: novel_id.to_string(),
+                    sort,
+                    name: name.to_string(),
+                    description: desc.to_string(),
+                },
+            ) {
                 eprintln!("plan: 写入卷大纲失败: {}", e);
             } else {
                 phase_count += 1;
@@ -142,5 +182,8 @@ pub async fn execute_plan_outline(
         }
     }
 
-    Ok(format!("已规划大纲: {} 卷, {} 章。", phase_count, chapter_count))
+    Ok(format!(
+        "已规划大纲: {} 卷, {} 章。",
+        phase_count, chapter_count
+    ))
 }

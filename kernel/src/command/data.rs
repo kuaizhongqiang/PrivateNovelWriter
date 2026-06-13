@@ -189,7 +189,7 @@ pub enum DataCommand {
     // ── Patch ──
     PatchOutlineChapter {
         chapter_id: String,
-        field: String,  // "content" | "hook"
+        field: String, // "content" | "hook"
         old_text: String,
         new_text: String,
     },
