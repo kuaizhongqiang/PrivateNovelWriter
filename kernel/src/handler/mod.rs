@@ -25,6 +25,7 @@ pub enum Output {
     TextChapterWithContent { chapter: TextChapter, content: String },
     SampleList(Vec<DetailSample>),
     Status(String),
+    StatusJson(serde_json::Value),
     Ok,
 }
 
@@ -272,7 +273,7 @@ impl Handler {
             }
 
             // ── Patch Text Chapter ──
-            DataCommand::PatchTextChapter { chapter_id, field: _, old_text, new_text } => {
+            DataCommand::PatchTextChapter { chapter_id, old_text, new_text } => {
                 let c = crud::get_text_chapter(&self.conn, &chapter_id)?
                     .ok_or_else(|| HandlerError::NotFound(format!("Text chapter {}", chapter_id)))?;
                 let full_path = self.project_path.join(&c.file_path);

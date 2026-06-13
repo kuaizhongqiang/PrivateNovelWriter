@@ -195,7 +195,6 @@ pub enum DataCommand {
     },
     PatchTextChapter {
         chapter_id: String,
-        field: String,  // "content"
         old_text: String,
         new_text: String,
     },
