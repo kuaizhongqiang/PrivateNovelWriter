@@ -13,15 +13,7 @@ pub async fn execute_plan_outline(
     brief: &str,
     event_sender: Option<&Arc<Mutex<Option<tokio::sync::mpsc::UnboundedSender<LlmEvent>>>>>,
 ) -> Result<String, LlmError> {
-    let emit = |name: &str, status: &str| {
-        if let Some(sender) = event_sender {
-            if let Ok(guard) = sender.try_lock() {
-                if let Some(ref tx) = *guard {
-                    let _ = tx.send(LlmEvent::Step { name: name.to_string(), status: status.to_string() });
-                }
-            }
-        }
-    };
+    let emit = super::make_emit(event_sender);
 
     emit("read", "读取小说设定和角色");
     let setting = crud::get_setting(conn, novel_id).map_err(|e| LlmError::Api(format!("DB error: {}", e)))?;

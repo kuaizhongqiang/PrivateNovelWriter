@@ -339,6 +339,37 @@ pub fn delete_outline_chapter(conn: &Connection, id: &str) -> Result<()> {
     Ok(())
 }
 
+/// 通过 text_chapter_id 查找关联的 outline_chapter (JOIN, 1 次查询)
+pub fn find_outline_chapter_by_text_id(
+    conn: &Connection,
+    novel_id: &str,
+    text_chapter_id: &str,
+) -> Result<Option<(OutlinePhase, OutlineChapter)>> {
+    let mut stmt = conn.prepare(
+        "SELECT oc.id, oc.phase_id, oc.sort, oc.chapter_name, oc.content, oc.hook, oc.text_chapter_id,
+                op.id, op.novel_id, op.sort, op.name, op.description
+         FROM outline_chapter oc
+         JOIN outline_phase op ON oc.phase_id = op.id
+         WHERE op.novel_id = ?1 AND oc.text_chapter_id = ?2
+         LIMIT 1"
+    )?;
+    let mut rows = stmt.query(params![novel_id, text_chapter_id])?;
+    if let Some(row) = rows.next()? {
+        let oc = OutlineChapter {
+            id: row.get(0)?, phase_id: row.get(1)?, sort: row.get(2)?,
+            chapter_name: row.get(3)?, content: row.get(4)?, hook: row.get(5)?,
+            text_chapter_id: row.get(6)?,
+        };
+        let op = OutlinePhase {
+            id: row.get(7)?, novel_id: row.get(8)?, sort: row.get(9)?,
+            name: row.get(10)?, description: row.get(11)?,
+        };
+        Ok(Some((op, oc)))
+    } else {
+        Ok(None)
+    }
+}
+
 // ── Text Phase ──
 
 pub fn create_text_phase(conn: &Connection, p: &TextPhase) -> Result<()> {

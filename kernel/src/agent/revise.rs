@@ -16,15 +16,7 @@ pub async fn execute_revise(
     feedback: &str,
     event_sender: Option<&Arc<Mutex<Option<tokio::sync::mpsc::UnboundedSender<LlmEvent>>>>>,
 ) -> Result<String, LlmError> {
-    let emit = |name: &str, status: &str| {
-        if let Some(sender) = event_sender {
-            if let Ok(guard) = sender.try_lock() {
-                if let Some(ref tx) = *guard {
-                    let _ = tx.send(LlmEvent::Step { name: name.to_string(), status: status.to_string() });
-                }
-            }
-        }
-    };
+    let emit = super::make_emit(event_sender);
 
     emit("read", "读取原文");
     let tc = crud::get_text_chapter(conn, chapter_id)

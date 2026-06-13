@@ -110,6 +110,24 @@ pub async fn execute_agent_command_stream(
     }
 }
 
+/// 创建 emit 闭包，供各 agent 模块使用
+pub fn make_emit(
+    event_sender: Option<&Arc<Mutex<Option<tokio::sync::mpsc::UnboundedSender<LlmEvent>>>>>
+) -> impl Fn(&str, &str) + '_ {
+    move |name, status| {
+        if let Some(sender) = event_sender {
+            if let Ok(guard) = sender.try_lock() {
+                if let Some(ref tx) = *guard {
+                    let _ = tx.send(LlmEvent::Step {
+                        name: name.to_string(),
+                        status: status.to_string(),
+                    });
+                }
+            }
+        }
+    }
+}
+
 fn get_active_novel_id(conn: &Connection) -> Result<String, LlmError> {
     use crate::db::crud;
     let list = crud::list_novels(conn).map_err(|e| LlmError::Api(format!("DB error: {}", e)))?;
