@@ -6,6 +6,8 @@ use pnw_kernel::db::{crud, schema};
 use pnw_kernel::handler::{Handler, Output};
 use pnw_kernel::storage;
 
+mod server;
+
 fn get_project_path() -> PathBuf {
     if let Ok(p) = std::env::var("PNW_PROJECT") {
         return PathBuf::from(p);
@@ -137,6 +139,18 @@ enum Commands {
     Evaluate {
         /// 正文章节 ID
         id: String,
+    },
+    /// HTTP 服务模式
+    Server {
+        /// 监听地址
+        #[arg(long, default_value = "127.0.0.1")]
+        host: String,
+        /// 监听端口
+        #[arg(long, default_value_t = 3000)]
+        port: u16,
+        /// 项目路径
+        #[arg(long)]
+        project: Option<String>,
     },
 }
 
@@ -406,13 +420,16 @@ async fn main() {
         // Agent 命令需要异步执行
         Commands::Chapter { action } => handle_chapter_agent(action).await,
         Commands::Evaluate { id } => handle_evaluate(id).await,
+        Commands::Server { host, port, project } => {
+            server::run_server(host, *port, project.as_deref()).await;
+        }
         other => {
             let project_path = get_project_path();
             let conn = open_db(&project_path).expect("Cannot open project database");
             let mut handler = Handler::new(conn, project_path);
 
             let result = match other {
-                Commands::Novel { .. } => unreachable!(),
+                Commands::Novel { .. } | Commands::Server { .. } => unreachable!(),
                 Commands::Chapter { .. } | Commands::Evaluate { .. } => unreachable!(),
                 Commands::Setting { action } => handle_setting(&mut handler, action),
                 Commands::Character { action } => handle_character(&mut handler, action),
