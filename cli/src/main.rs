@@ -151,6 +151,9 @@ enum Commands {
         /// 项目路径
         #[arg(long)]
         project: Option<String>,
+        /// CORS 允许的来源（默认 *，生产环境应指定具体域名）
+        #[arg(long, default_value = "*")]
+        cors_origin: String,
     },
     /// 导出
     Export {
@@ -437,8 +440,8 @@ async fn main() {
         // Agent 命令需要异步执行
         Commands::Chapter { action } => handle_chapter_agent(action).await,
         Commands::Evaluate { id } => handle_evaluate(id).await,
-        Commands::Server { host, port, project } => {
-            server::run_server(host, *port, project.as_deref()).await;
+        Commands::Server { host, port, project, cors_origin } => {
+            server::run_server(host, *port, project.as_deref(), cors_origin).await;
         }
         other => {
             let project_path = get_project_path();

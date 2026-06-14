@@ -106,7 +106,26 @@
 | GET | `/api/setting` | 读世界观设定 |
 | POST | `/api/setting` | 更新设定 |
 | GET | `/api/samples` | 文风样例列表 |
-| POST | `/api/command` | 通用命令接口 |
+| POST | `/api/command` | 通用命令接口（支持读写，详见下方） |
+
+### 通用命令 (`POST /api/command`)
+
+请求体 `{ "command": "...", "args": { ... } }` 支持的命令：
+
+| command | args | 说明 |
+| :--- | :--- | :--- |
+| `get_outline` | — | 大纲树 |
+| `get_novel` | — | 小说信息 |
+| `list_characters` | — | 角色列表 |
+| `get_setting` | — | 设定详情 |
+| `list_samples` | — | 文风样例列表 |
+| `get_plugin` | — | 金手指设定 |
+| `list_outline_phases` | — | 大纲卷列表 |
+| `list_outline_chapters` | `{ phase_id }` | 卷下的大纲章列表 |
+| `create_outline_phase` | `{ name }` | 创建大纲卷 |
+| `create_outline_chapter` | `{ phase_id, name }` | 创建大纲章 |
+| `create_character` | `{ name, char_type?, age?, relationship? }` | 创建角色 |
+| `write_setting` | `{ title?, inspiration?, description?, novel_type?, tags? }` | 更新设定 |
 
 ### 写作
 

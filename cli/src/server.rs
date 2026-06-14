@@ -1,8 +1,10 @@
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use axum::{
-    extract::{Path as AxumPath, State},
+    extract::{Path as AxumPath, Query, State},
+    http::Method,
     response::{Html, IntoResponse, Json},
     routing::{get, post},
     Router,
@@ -13,12 +15,16 @@ use pnw_kernel::db::{crud, schema};
 use pnw_kernel::handler::{Handler, Output};
 use pnw_kernel::storage;
 use serde::{Deserialize, Serialize};
-use tower_http::cors::CorsLayer;
+use tower_http::cors::{Any, CorsLayer};
 
 // ─── Shared state ───
 
 struct AppState {
     project_path: PathBuf,
+    /// Server start timestamp (Unix seconds), used as session identifier
+    session_start: u64,
+    /// Request counter for session tracking
+    request_count: AtomicU64,
 }
 
 // ─── JSON envelope ───
@@ -77,7 +83,7 @@ fn active_novel_id(conn: &rusqlite::Connection) -> Result<String, String> {
 
 // ─── Routes ───
 
-pub async fn run_server(host: &str, port: u16, project: Option<&str>) {
+pub async fn run_server(host: &str, port: u16, project: Option<&str>, cors_origin: &str) {
     let project_path = if let Some(p) = project {
         PathBuf::from(p)
     } else if let Ok(p) = std::env::var("PNW_PROJECT") {
@@ -98,7 +104,23 @@ pub async fn run_server(host: &str, port: u16, project: Option<&str>) {
     schema::init_schema(&conn).expect("Cannot init schema");
     drop(conn);
 
-    let state = Arc::new(AppState { project_path });
+    // Clean up orphan .tmp files from interrupted atomic writes
+    if let Ok(n) = storage::cleanup_orphan_tmp(&project_path) {
+        if n > 0 {
+            eprintln!("Cleaned up {} orphan .tmp files", n);
+        }
+    }
+
+    let session_start = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+
+    let state = Arc::new(AppState {
+        project_path,
+        session_start,
+        request_count: AtomicU64::new(0),
+    });
 
     let app = Router::new()
         .route("/", get(gateway_index))
@@ -118,7 +140,15 @@ pub async fn run_server(host: &str, port: u16, project: Option<&str>) {
         .route("/api/agent/evaluate/{id}", post(api_agent_evaluate))
         .route("/api/export/txt", post(api_export_txt))
         .route("/api/command", post(api_command))
-        .layer(CorsLayer::permissive())
+        .layer(if cors_origin == "*" {
+            CorsLayer::permissive()
+        } else {
+            let origin: axum::http::HeaderValue = cors_origin.parse().unwrap();
+            CorsLayer::new()
+                .allow_origin(origin)
+                .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE])
+                .allow_headers(Any)
+        })
         .with_state(state);
 
     let addr = format!("{}:{}", host, port);
@@ -141,11 +171,14 @@ async fn gateway_js() -> impl IntoResponse {
 
 // ─── API handlers ───
 
-async fn api_status() -> Json<serde_json::Value> {
+async fn api_status(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
+    let count = state.request_count.fetch_add(1, Ordering::Relaxed) + 1;
     Json(serde_json::json!({
         "status": "ok",
         "version": env!("CARGO_PKG_VERSION"),
         "name": "PrivateNovelWriter",
+        "session_start": state.session_start,
+        "request_count": count,
     }))
 }
 
@@ -248,7 +281,9 @@ async fn api_chapter_save(
         Err(e) => return Json(ApiResponse::err_inner(e.to_string())),
     };
     let full_path = state.project_path.join(&tc.file_path);
-    storage::write_text(&full_path, &body.content).map_err(|e| e.to_string()).unwrap();
+    if let Err(e) = storage::write_text(&full_path, &body.content) {
+        return Json(ApiResponse::err_inner(format!("Write error: {}", e)));
+    }
     let wc = storage::count_chars(&body.content);
     let mut updated = tc;
     updated.word_count = wc;
@@ -477,7 +512,12 @@ async fn api_agent_evaluate(
 
 // ─── Export ───
 
-async fn api_export_txt(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
+#[derive(Deserialize)]
+struct ExportQuery {
+    limit: Option<usize>,
+}
+
+async fn api_export_txt(State(state): State<Arc<AppState>>, Query(q): Query<ExportQuery>) -> Json<serde_json::Value> {
     let handler = match open_fresh_handler(&state) {
         Ok(h) => h,
         Err(e) => return Json(serde_json::json!({"status":"error","error":e})),
@@ -502,7 +542,9 @@ async fn api_export_txt(State(state): State<Arc<AppState>>) -> Json<serde_json::
         }
     }
     all_chapters.sort_by(|a, b| a.2.cmp(&b.2));
-    let merged: String = all_chapters.iter().fold(String::new(), |mut acc, (pn, cn, _, c)| {
+    let count = all_chapters.len();
+    let limited = q.limit.map(|l| &all_chapters[..l.min(count)]).unwrap_or(&all_chapters);
+    let merged: String = limited.iter().fold(String::new(), |mut acc, (pn, cn, _, c)| {
         acc.push_str(&format!("【{}】{}\n\n{}\n\n", pn, cn, c));
         acc
     });
@@ -510,7 +552,8 @@ async fn api_export_txt(State(state): State<Arc<AppState>>) -> Json<serde_json::
     Json(serde_json::json!({
         "status":"ok",
         "novel_name": novel.name,
-        "chapter_count": all_chapters.len(),
+        "chapter_count": count,
+        "returned_chapters": limited.len(),
         "word_count": wc,
         "content": merged,
     }))
@@ -534,12 +577,55 @@ async fn api_command(
         Err(e) => return api_err(e),
     };
     let cmd = match body.command.as_str() {
+        // Read commands
         "get_outline" => DataCommand::GetOutlineTree { novel_id, phase_id: None },
         "get_novel" => DataCommand::GetNovel { id: novel_id },
         "list_characters" => DataCommand::ListCharacters { novel_id },
         "get_setting" => DataCommand::GetSetting { novel_id },
         "list_samples" => DataCommand::ListSamples { novel_id },
+        "get_plugin" => DataCommand::GetPlugin { novel_id },
         "list_outline_phases" => DataCommand::ListOutlinePhases { novel_id },
+        "list_outline_chapters" => {
+            let pid = body.args.get("phase_id").and_then(|v| v.as_str()).unwrap_or("");
+            DataCommand::ListOutlineChapters { phase_id: pid.to_string() }
+        }
+        // Write commands
+        "create_outline_phase" => {
+            let name = body.args.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let phases = crud::list_outline_phases(&handler.conn, &novel_id).unwrap_or_default();
+            let sort = phases.iter().map(|p| p.sort).max().unwrap_or(-1) + 1;
+            DataCommand::CreateOutlinePhase {
+                id: uuid::Uuid::new_v4().to_string(), novel_id, sort,
+                name, description: String::new(),
+            }
+        }
+        "create_outline_chapter" => {
+            let name = body.args.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let pid = body.args.get("phase_id").and_then(|v| v.as_str()).unwrap_or("");
+            DataCommand::CreateOutlineChapter {
+                id: uuid::Uuid::new_v4().to_string(), phase_id: pid.to_string(),
+                sort: 0, chapter_name: name, content: String::new(), hook: String::new(),
+            }
+        }
+        "create_character" => {
+            DataCommand::CreateCharacter {
+                id: uuid::Uuid::new_v4().to_string(), novel_id,
+                name: body.args.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                char_type: body.args.get("char_type").and_then(|v| v.as_i64()).unwrap_or(2) as i32,
+                age: body.args.get("age").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
+                relationship: body.args.get("relationship").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+            }
+        }
+        "write_setting" => {
+            DataCommand::WriteSetting {
+                novel_id,
+                title: body.args.get("title").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                inspiration: body.args.get("inspiration").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                description: body.args.get("description").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                novel_type: body.args.get("novel_type").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
+                tags: body.args.get("tags").and_then(|v| v.as_array()).map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect()).unwrap_or_default(),
+            }
+        }
         _ => return api_err(format!("Unknown command: {}", body.command)),
     };
     match handler.execute(cmd) {
@@ -641,9 +727,29 @@ const GATEWAY_JS: &str = r#"
 const BASE = '';
 let state = {};
 
+function showError(msg) {
+  const el = document.getElementById('error-toast') || (() => {
+    const d = document.createElement('div');
+    d.id = 'error-toast';
+    d.style.cssText = 'position:fixed;top:12px;right:12px;padding:12px 20px;background:#ef4444;color:#fff;border-radius:8px;font-size:13px;z-index:999;max-width:400px;display:none';
+    document.body.appendChild(d);
+    return d;
+  })();
+  el.textContent = msg;
+  el.style.display = 'block';
+  setTimeout(() => { el.style.display = 'none'; }, 5000);
+}
+
 async function api(path, opts = {}) {
-  const url = BASE + '/api' + path;
-  return fetch(url, { headers: { 'Content-Type': 'application/json' }, ...opts }).then(r => r.json());
+  try {
+    const res = await fetch(BASE + '/api' + path, { headers: { 'Content-Type': 'application/json' }, ...opts });
+    const json = await res.json();
+    if (json.status === 'error' && json.error) showError(json.error);
+    return json;
+  } catch (e) {
+    showError('请求失败: ' + e.message);
+    return { status: 'error', error: e.message };
+  }
 }
 
 async function loadStats() {

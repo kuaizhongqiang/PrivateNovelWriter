@@ -426,8 +426,7 @@ fn list_samples(state: State<AppState>) -> Result<serde_json::Value, String> {
 #[tauri::command]
 fn get_plugin(state: State<AppState>) -> Result<serde_json::Value, String> {
     if *state.mode.lock().unwrap() == "server" {
-        return server_api(&state, "/api/command")
-            .map(|v| serde_json::json!({"Plugin": v}));
+        return server_api_post(&state, "/api/command", serde_json::json!({"command": "get_plugin"}));
     }
     let handler = ensure_handler(&state)?;
     let novel_id = active_novel_id(&handler.conn)?;
