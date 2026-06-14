@@ -34,11 +34,13 @@ struct ApiResponse<T: Serialize> {
     status: String,
     data: Option<T>,
     error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error_code: Option<String>,
 }
 
 impl<T: Serialize> ApiResponse<T> {
     fn ok(data: T) -> Self {
-        Self { status: "ok".into(), data: Some(data), error: None }
+        Self { status: "ok".into(), data: Some(data), error: None, error_code: None }
     }
 }
 
@@ -48,6 +50,7 @@ impl ApiResponse<serde_json::Value> {
             status: "ok".into(),
             data: Some(serde_json::to_value(output).unwrap_or_default()),
             error: None,
+            error_code: None,
         }
     }
 }
@@ -57,6 +60,16 @@ fn api_err(msg: impl ToString) -> Json<ApiResponse<serde_json::Value>> {
         status: "error".into(),
         data: None,
         error: Some(msg.to_string()),
+        error_code: None,
+    })
+}
+
+fn api_err_with_code(msg: impl ToString, code: &str) -> Json<ApiResponse<serde_json::Value>> {
+    Json(ApiResponse {
+        status: "error".into(),
+        data: None,
+        error: Some(msg.to_string()),
+        error_code: Some(code.to_string()),
     })
 }
 
@@ -327,12 +340,15 @@ async fn api_chapter_save(
     let mut updated = tc;
     updated.word_count = wc;
     crud::update_text_chapter(&handler.conn, &updated).ok();
-    Json(ApiResponse { status: "ok".into(), data: Some("saved"), error: None })
+    Json(ApiResponse { status: "ok".into(), data: Some("saved"), error: None, error_code: None })
 }
 
 impl ApiResponse<&'static str> {
     fn err_inner(msg: impl ToString) -> Self {
-        Self { status: "error".into(), data: None, error: Some(msg.to_string()) }
+        Self { status: "error".into(), data: None, error: Some(msg.to_string()), error_code: None }
+    }
+    fn err_code(msg: impl ToString, code: &str) -> Self {
+        Self { status: "error".into(), data: None, error: Some(msg.to_string()), error_code: Some(code.to_string()) }
     }
 }
 
