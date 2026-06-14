@@ -1,6 +1,8 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use tokio::sync::Mutex;
 
 use axum::{
     extract::{Path as AxumPath, Query, State},
@@ -25,6 +27,8 @@ struct AppState {
     session_start: u64,
     /// Request counter for session tracking
     request_count: AtomicU64,
+    /// Idempotency store: client_request_id → JSON result
+    idempotent_results: Mutex<HashMap<String, serde_json::Value>>,
 }
 
 // ─── JSON envelope ───
@@ -133,6 +137,7 @@ pub async fn run_server(host: &str, port: u16, project: Option<&str>, cors_origi
         project_path,
         session_start,
         request_count: AtomicU64::new(0),
+        idempotent_results: Mutex::new(HashMap::new()),
     });
 
     let app = Router::new()
@@ -202,7 +207,7 @@ async fn api_health() -> Json<serde_json::Value> {
     Json(serde_json::json!({"status":"ok","service":"pnw-server"}))
 }
 
-/// Tool discovery — returns available commands and endpoints
+/// Tool discovery — returns available commands, endpoints, and parameter schemas
 async fn api_tools() -> Json<serde_json::Value> {
     Json(serde_json::json!({
         "endpoints": [
@@ -227,14 +232,27 @@ async fn api_tools() -> Json<serde_json::Value> {
             {"path":"/api/tools","method":"GET","description":"工具发现（本端点）"}
         ],
         "commands": [
-            "get_outline","get_novel","list_characters","get_setting",
-            "list_samples","get_plugin","list_outline_phases","list_outline_chapters",
-            "list_text_phases","list_text_chapters",
-            "create_outline_phase","create_outline_chapter","create_character",
-            "create_text_phase","create_text_chapter",
-            "delete_character","delete_outline_phase","delete_outline_chapter",
-            "write_setting",
-            "get_unwritten_chapters","get_phase_progress"
+            {"name":"get_outline","params":"none","description":"读取完整大纲树"},
+            {"name":"get_novel","params":"none","description":"小说基本信息"},
+            {"name":"list_characters","params":"none","description":"角色列表"},
+            {"name":"get_setting","params":"none","description":"世界观设定"},
+            {"name":"list_samples","params":"none","description":"文风样例"},
+            {"name":"get_plugin","params":"none","description":"金手指设定"},
+            {"name":"list_outline_phases","params":"none","description":"大纲卷列表"},
+            {"name":"list_outline_chapters","params":{"phase_id":"string"},"description":"卷下大纲章"},
+            {"name":"list_text_phases","params":"none","description":"正文卷列表"},
+            {"name":"list_text_chapters","params":{"phase_id":"string"},"description":"卷下正文章"},
+            {"name":"create_outline_phase","params":{"name":"string"},"description":"创建大纲卷"},
+            {"name":"create_outline_chapter","params":{"phase_id":"string","name":"string","content?":"string","hook?":"string"},"description":"创建大纲章"},
+            {"name":"create_character","params":{"name":"string","char_type?":"number","age?":"number","relationship?":"string"},"description":"创建角色"},
+            {"name":"create_text_phase","params":{"name":"string"},"description":"创建正文卷"},
+            {"name":"create_text_chapter","params":{"phase_id":"string","name":"string","from_outline":"string"},"description":"创建正文章节"},
+            {"name":"delete_character","params":{"id":"string"},"description":"删除角色"},
+            {"name":"delete_outline_phase","params":{"phase_id":"string"},"description":"删除大纲卷"},
+            {"name":"delete_outline_chapter","params":{"id":"string"},"description":"删除大纲章"},
+            {"name":"write_setting","params":{"title?":"string","inspiration?":"string","description?":"string","novel_type?":"number","tags?":"string[]"},"description":"更新设定"},
+            {"name":"get_unwritten_chapters","params":"none","description":"列出未写正文的大纲章"},
+            {"name":"get_phase_progress","params":"none","description":"各卷完成进度"}
         ]
     }))
 }
@@ -622,7 +640,13 @@ async fn api_export_txt(State(state): State<Arc<AppState>>, Query(q): Query<Expo
 // ─── Generic command ───
 
 #[derive(Deserialize)]
-struct CmdBody { command: String, #[serde(default)] args: serde_json::Value }
+struct CmdBody {
+    command: String,
+    #[serde(default)]
+    args: serde_json::Value,
+    #[serde(default)]
+    client_request_id: Option<String>,
+}
 
 async fn api_command(
     State(state): State<Arc<AppState>>,
@@ -636,6 +660,23 @@ async fn api_command(
         Ok(id) => id,
         Err(e) => return api_err(e),
     };
+
+    // Idempotency: if client_request_id is provided and we already have a result, return it
+    if let Some(ref rid) = body.client_request_id {
+        if !rid.is_empty() {
+            let store = state.idempotent_results.lock().await;
+            if let Some(cached) = store.get(rid) {
+                return Json(ApiResponse {
+                    status: "ok".into(),
+                    data: Some(cached.clone()),
+                    error: None,
+                    error_code: None,
+                });
+            }
+            drop(store);
+        }
+    }
+
     let cmd = match body.command.as_str() {
         // Read commands
         "get_outline" => DataCommand::GetOutlineTree { novel_id, phase_id: None },
@@ -768,8 +809,17 @@ async fn api_command(
         }
         _ => return api_err(format!("Unknown command: {}", body.command)),
     };
-    match handler.execute(cmd) {
-        Ok(output) => Json(ApiResponse::from_output(output)),
+    let result = handler.execute(cmd);
+    match &result {
+        Ok(output) => {
+            if let Some(ref rid) = body.client_request_id {
+                if !rid.is_empty() {
+                    let val = serde_json::to_value(output).unwrap_or_default();
+                    state.idempotent_results.lock().await.insert(rid.clone(), val);
+                }
+            }
+            Json(ApiResponse::from_output(output.clone()))
+        }
         Err(e) => api_err(e.to_string()),
     }
 }

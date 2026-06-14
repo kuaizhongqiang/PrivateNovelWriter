@@ -113,7 +113,9 @@
 
 ### 通用命令 (`POST /api/command`)
 
-请求体 `{ "command": "...", "args": { ... } }` 支持的命令：
+请求体 `{ "command": "...", "args": { ... }, "client_request_id": "..." }` 支持的命令：
+
+> `client_request_id` 可选参数。提供后，相同 ID 的重复请求不会重复执行，而是返回首次执行的结果。用于网络超时后安全重试。
 
 | command | args | 说明 |
 | :--- | :--- | :--- |
