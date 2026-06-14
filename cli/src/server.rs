@@ -127,6 +127,8 @@ pub async fn run_server(host: &str, port: u16, project: Option<&str>, cors_origi
         .route("/gateway/style.css", get(gateway_css))
         .route("/gateway/app.js", get(gateway_js))
         .route("/api/status", get(api_status))
+        .route("/api/health", get(api_health))
+        .route("/api/tools", get(api_tools))
         .route("/api/project", get(api_project))
         .route("/api/outline", get(api_outline))
         .route("/api/chapters", get(api_chapters))
@@ -179,6 +181,43 @@ async fn api_status(State(state): State<Arc<AppState>>) -> Json<serde_json::Valu
         "name": "PrivateNovelWriter",
         "session_start": state.session_start,
         "request_count": count,
+    }))
+}
+
+/// Health check — lightweight, no DB needed
+async fn api_health() -> Json<serde_json::Value> {
+    Json(serde_json::json!({"status":"ok","service":"pnw-server"}))
+}
+
+/// Tool discovery — returns available commands and endpoints
+async fn api_tools() -> Json<serde_json::Value> {
+    Json(serde_json::json!({
+        "endpoints": [
+            {"path":"/api/health","method":"GET","description":"健康检查"},
+            {"path":"/api/status","method":"GET","description":"Server 信息（版本+session）"},
+            {"path":"/api/project","method":"GET","description":"项目基本信息"},
+            {"path":"/api/outline","method":"GET","description":"大纲树"},
+            {"path":"/api/chapters","method":"GET","description":"所有正文章节列表"},
+            {"path":"/api/chapter/{id}","method":"GET","description":"读取章节正文"},
+            {"path":"/api/chapter/{id}","method":"PUT","description":"保存章节正文"},
+            {"path":"/api/characters","method":"GET","description":"角色列表"},
+            {"path":"/api/characters","method":"POST","description":"创建角色"},
+            {"path":"/api/setting","method":"GET","description":"读取世界观设定"},
+            {"path":"/api/setting","method":"POST","description":"更新世界观设定"},
+            {"path":"/api/samples","method":"GET","description":"文风样例列表"},
+            {"path":"/api/stats","method":"GET","description":"项目统计"},
+            {"path":"/api/export/txt","method":"GET","description":"导出合并全文"},
+            {"path":"/api/agent/write","method":"POST","description":"写正文（Agent B）"},
+            {"path":"/api/agent/revise","method":"POST","description":"修改正文（Agent B）"},
+            {"path":"/api/agent/evaluate/{id}","method":"POST","description":"评估章节（Agent B）"},
+            {"path":"/api/command","method":"POST","description":"通用命令接口"},
+            {"path":"/api/tools","method":"GET","description":"工具发现（本端点）"}
+        ],
+        "commands": [
+            "get_outline","get_novel","list_characters","get_setting",
+            "list_samples","get_plugin","list_outline_phases","list_outline_chapters",
+            "create_outline_phase","create_outline_chapter","create_character","write_setting"
+        ]
     }))
 }
 
