@@ -37,13 +37,14 @@ fn test_server_integration() {
     assert!(out.contains("Created novel"), "create novel: {}", out);
 
     let port = 19191 + (std::process::id() % 1000) as u16;
+    let proj_path = std::fs::canonicalize(tmp.join("server-test")).unwrap_or(tmp.join("server-test"));
     let mut server = Command::new(&pnw)
         .args([
             "server",
             "--port",
             &port.to_string(),
             "--project",
-            tmp.join("server-test").to_str().unwrap(),
+            proj_path.to_str().unwrap(),
         ])
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::piped())
@@ -137,7 +138,8 @@ fn test_e2e_full_workflow() {
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(&tmp).unwrap();
     std::env::set_current_dir(&tmp).unwrap();
-    std::env::set_var("PNW_PROJECT", tmp.join("e2e-novel").to_str().unwrap());
+    let proj_path = std::fs::canonicalize(tmp.join("e2e-novel")).unwrap_or(tmp.join("e2e-novel"));
+    std::env::set_var("PNW_PROJECT", proj_path.to_str().unwrap());
 
     let out = run(&pnw, &["novel", "new", "e2e-novel"]);
     assert!(out.contains("Created novel"), "create novel: {}", out);
