@@ -974,7 +974,7 @@ fn handle_export(
                 }
             }
 
-            all_chapters.sort_by(|a, b| a.2.cmp(&b.2));
+            all_chapters.sort_by_key(|a| a.2);
 
             let mut merged = String::new();
             for (phase_name, ch_name, _sort, content) in &all_chapters {
@@ -988,7 +988,7 @@ fn handle_export(
             let default_name = format!("{}_{}——{}", novel.name, first_sort, last_sort);
             let out_path = output
                 .as_ref()
-                .map(|p| std::path::PathBuf::from(p))
+                .map(std::path::PathBuf::from)
                 .unwrap_or_else(|| {
                     let mut p = std::env::current_dir().unwrap_or_default();
                     p.push(format!("{}.txt", default_name));

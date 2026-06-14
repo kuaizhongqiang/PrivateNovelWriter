@@ -73,6 +73,7 @@ fn api_err(msg: impl ToString) -> Json<ApiResponse<serde_json::Value>> {
     })
 }
 
+#[allow(dead_code)]
 fn api_err_with_code(msg: impl ToString, code: &str) -> Json<ApiResponse<serde_json::Value>> {
     Json(ApiResponse {
         status: "error".into(),
@@ -410,6 +411,7 @@ impl ApiResponse<&'static str> {
             error_code: None,
         }
     }
+    #[allow(dead_code)]
     fn err_code(msg: impl ToString, code: &str) -> Self {
         Self {
             status: "error".into(),
@@ -727,7 +729,7 @@ async fn api_export_txt(
             }
         }
     }
-    all_chapters.sort_by(|a, b| a.2.cmp(&b.2));
+    all_chapters.sort_by_key(|a| a.2);
     let count = all_chapters.len();
     let limited = q
         .limit

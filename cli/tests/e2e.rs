@@ -37,7 +37,7 @@ fn test_server_integration() {
 
     let port = 19191 + (std::process::id() % 1000) as u16;
     let mut server = Command::new(&pnw)
-        .args(&[
+        .args([
             "server",
             "--port",
             &port.to_string(),
@@ -58,7 +58,7 @@ fn test_server_integration() {
     let client = reqwest::blocking::Client::new();
     let get = |path: &str| -> serde_json::Value {
         client
-            .get(&format!("{}{}", base, path))
+            .get(format!("{}{}", base, path))
             .send()
             .unwrap()
             .json()
@@ -83,7 +83,7 @@ fn test_server_integration() {
     // POST /api/command
     assert_eq!(
         client
-            .post(&format!("{}/api/command", base))
+            .post(format!("{}/api/command", base))
             .json(&serde_json::json!({"command": "get_novel"}))
             .send()
             .unwrap()
@@ -93,7 +93,7 @@ fn test_server_integration() {
     );
     assert_eq!(
         client
-            .post(&format!("{}/api/command", base))
+            .post(format!("{}/api/command", base))
             .json(&serde_json::json!({"command": "create_character", "args": {"name": "测试角色"}}))
             .send()
             .unwrap()
@@ -103,7 +103,7 @@ fn test_server_integration() {
     );
     assert_eq!(
         client
-            .post(&format!("{}/api/command", base))
+            .post(format!("{}/api/command", base))
             .json(&serde_json::json!({"command": "nonexistent"}))
             .send()
             .unwrap()
@@ -114,7 +114,7 @@ fn test_server_integration() {
 
     // Gateway UI
     let html = client
-        .get(&format!("{}", base))
+        .get(base.to_string())
         .send()
         .unwrap()
         .text()
@@ -123,7 +123,7 @@ fn test_server_integration() {
 
     // Cleanup
     let _ = std::process::Command::new("taskkill")
-        .args(&["/F", "/PID", &server.id().to_string()])
+        .args(["/F", "/PID", &server.id().to_string()])
         .output();
     std::env::set_current_dir(std::env::temp_dir()).ok();
     let _ = std::fs::remove_dir_all(&tmp);
