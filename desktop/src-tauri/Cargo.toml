@@ -18,6 +18,7 @@ chrono = "=0.4.38"
 tokio = { version = "1", features = ["full"] }
 uuid = { version = "1", features = ["v4"] }
 dotenv = "0.15"
+reqwest = { version = "0.12", features = ["json", "blocking"] }
 
 [features]
 default = ["custom-protocol"]

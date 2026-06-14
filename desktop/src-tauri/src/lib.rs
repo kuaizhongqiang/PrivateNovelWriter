@@ -15,6 +15,28 @@ struct AppState {
     project_path: Mutex<Option<PathBuf>>,
     conn: Mutex<Option<rusqlite::Connection>>,
     rt: tokio::runtime::Runtime,
+    /// 运行模式: "standalone" (默认) 或 "server"
+    mode: Mutex<String>,
+    /// Server URL (server 模式下使用)
+    server_url: Mutex<String>,
+}
+
+/// 向 PNW Server 发请求 (server-client 模式)
+fn server_api(state: &AppState, path: &str) -> Result<serde_json::Value, String> {
+    let url = format!("{}{}", state.server_url.lock().unwrap(), path);
+    let resp = reqwest::blocking::get(&url).map_err(|e| format!("Server error: {}", e))?;
+    resp.json().map_err(|e| format!("JSON error: {}", e))
+}
+
+fn server_api_post(state: &AppState, path: &str, body: serde_json::Value) -> Result<serde_json::Value, String> {
+    let url = format!("{}{}", state.server_url.lock().unwrap(), path);
+    let client = reqwest::blocking::Client::new();
+    let resp = client
+        .post(&url)
+        .json(&body)
+        .send()
+        .map_err(|e| format!("Server error: {}", e))?;
+    resp.json().map_err(|e| format!("JSON error: {}", e))
 }
 
 fn get_conn(
@@ -123,8 +145,10 @@ fn active_novel_id(conn: &rusqlite::Connection) -> Result<String, String> {
 
 #[tauri::command]
 fn get_outline(state: State<AppState>) -> Result<serde_json::Value, String> {
+    if *state.mode.lock().unwrap() == "server" {
+        return server_api(&state, "/api/outline");
+    }
     let handler = ensure_handler(&state)?;
-    // 从 handler 的独立连接获取 novel_id（避免与 cached conn 的锁竞争）
     let novel_id = active_novel_id(&handler.conn)?;
     let cmd = DataCommand::GetOutlineTree {
         novel_id,
@@ -136,6 +160,9 @@ fn get_outline(state: State<AppState>) -> Result<serde_json::Value, String> {
 
 #[tauri::command]
 fn get_chapter(state: State<AppState>, chapter_id: String) -> Result<serde_json::Value, String> {
+    if *state.mode.lock().unwrap() == "server" {
+        return server_api(&state, &format!("/api/chapter/{}", chapter_id));
+    }
     let guard = get_conn(&state)?;
     let conn = guard.as_ref().ok_or("No connection")?;
     let tc = crud::get_text_chapter(conn, &chapter_id)
@@ -163,6 +190,11 @@ fn get_chapter(state: State<AppState>, chapter_id: String) -> Result<serde_json:
 
 #[tauri::command]
 fn save_chapter(state: State<AppState>, chapter_id: String, content: String) -> Result<(), String> {
+    if *state.mode.lock().unwrap() == "server" {
+        let body = serde_json::json!({ "content": content });
+        server_api_post(&state, &format!("/api/chapter/{}", chapter_id), body)?;
+        return Ok(());
+    }
     let guard = get_conn(&state)?;
     let conn = guard.as_ref().ok_or("No connection")?;
     let project_path = state
@@ -313,6 +345,9 @@ fn agent_chat(
 
 #[tauri::command]
 fn get_stats(state: State<AppState>) -> Result<serde_json::Value, String> {
+    if *state.mode.lock().unwrap() == "server" {
+        return server_api(&state, "/api/stats");
+    }
     let guard = get_conn(&state)?;
     let conn = guard.as_ref().ok_or("No connection")?;
     let novel_id = active_novel_id(conn)?;
@@ -351,6 +386,9 @@ fn get_stats(state: State<AppState>) -> Result<serde_json::Value, String> {
 
 #[tauri::command]
 fn list_characters(state: State<AppState>) -> Result<serde_json::Value, String> {
+    if *state.mode.lock().unwrap() == "server" {
+        return server_api(&state, "/api/characters");
+    }
     let handler = ensure_handler(&state)?;
     let novel_id = active_novel_id(&handler.conn)?;
     let output = handler
@@ -361,6 +399,9 @@ fn list_characters(state: State<AppState>) -> Result<serde_json::Value, String> 
 
 #[tauri::command]
 fn get_setting(state: State<AppState>) -> Result<serde_json::Value, String> {
+    if *state.mode.lock().unwrap() == "server" {
+        return server_api(&state, "/api/setting");
+    }
     let handler = ensure_handler(&state)?;
     let novel_id = active_novel_id(&handler.conn)?;
     let output = handler
@@ -371,6 +412,9 @@ fn get_setting(state: State<AppState>) -> Result<serde_json::Value, String> {
 
 #[tauri::command]
 fn list_samples(state: State<AppState>) -> Result<serde_json::Value, String> {
+    if *state.mode.lock().unwrap() == "server" {
+        return server_api(&state, "/api/samples");
+    }
     let handler = ensure_handler(&state)?;
     let novel_id = active_novel_id(&handler.conn)?;
     let output = handler
@@ -381,6 +425,10 @@ fn list_samples(state: State<AppState>) -> Result<serde_json::Value, String> {
 
 #[tauri::command]
 fn get_plugin(state: State<AppState>) -> Result<serde_json::Value, String> {
+    if *state.mode.lock().unwrap() == "server" {
+        return server_api(&state, "/api/command")
+            .map(|v| serde_json::json!({"Plugin": v}));
+    }
     let handler = ensure_handler(&state)?;
     let novel_id = active_novel_id(&handler.conn)?;
     let output = handler
@@ -455,22 +503,63 @@ fn add_character(
     Ok(id)
 }
 
+// ─── CLI args ───
+
+fn parse_args() -> (String, String) {
+    let args: Vec<String> = std::env::args().collect();
+    let mut mode = "standalone".to_string();
+    let mut server_url = String::new();
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--mode" | "-m" => {
+                i += 1;
+                if i < args.len() { mode = args[i].clone(); }
+            }
+            "--server-url" | "-u" => {
+                i += 1;
+                if i < args.len() { server_url = args[i].clone(); }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    (mode, server_url)
+}
+
 // ─── App Entry ───
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let (mode, server_url) = parse_args();
+    let default_url = if server_url.is_empty() {
+        "http://127.0.0.1:3000".to_string()
+    } else {
+        server_url
+    };
+
     // Load .env from multiple locations
     dotenv::dotenv().ok(); // CWD
     dotenv::from_filename("../.env").ok(); // parent dir
     dotenv::from_filename("../../.env").ok(); // grandparent dir
+
+    let state = AppState {
+        project_path: Mutex::new(None),
+        conn: Mutex::new(None),
+        rt: tokio::runtime::Runtime::new().expect("Failed to create tokio runtime"),
+        mode: Mutex::new(mode),
+        server_url: Mutex::new(default_url),
+    };
+
+    eprintln!("Desktop mode: {}", state.mode.lock().unwrap());
+    if state.mode.lock().unwrap() == "server" {
+        eprintln!("Server URL: {}", state.server_url.lock().unwrap());
+    }
+
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
-        .manage(AppState {
-            project_path: Mutex::new(None),
-            conn: Mutex::new(None),
-            rt: tokio::runtime::Runtime::new().expect("Failed to create tokio runtime"),
-        })
+        .manage(state)
         .invoke_handler(tauri::generate_handler![
             open_project,
             new_project,
