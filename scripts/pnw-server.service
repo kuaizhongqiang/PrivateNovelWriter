@@ -1,0 +1,21 @@
+[Unit]
+Description=PrivateNovelWriter Server
+Documentation=https://github.com/kuaizhongqiang/PrivateNovelWriter
+After=network.target
+
+[Service]
+Type=simple
+User=%i
+WorkingDirectory=/opt/pnw
+ExecStart=/usr/local/bin/pnw server --host 127.0.0.1 --port 3000 --project /opt/pnw/projects
+Restart=on-failure
+RestartSec=5
+EnvironmentFile=/opt/pnw/.env
+# Hardening
+NoNewPrivileges=true
+ProtectHome=true
+ProtectSystem=full
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

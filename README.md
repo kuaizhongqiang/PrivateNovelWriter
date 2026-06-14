@@ -102,28 +102,42 @@ Server 启动后：
 
 ## 集成 OpenClaw
 
-### 方式一：Tool Plugin
+### 方式一：安装 PNW 插件（推荐）
 
-将 PNW 注册为 OpenClaw 的 tool plugin。Agent A 通过以下工具与 PNW 交互：
+```bash
+# 进入插件目录
+cd packages/pnw-openclaw-plugin
 
-| 工具 | 方法 | 路径 |
-| :--- | :--- | :--- |
-| 获取项目信息 | GET | `/api/project` |
-| 获取统计 | GET | `/api/stats` |
-| 获取大纲树 | GET | `/api/outline` |
-| 列出章节 | GET | `/api/chapters` |
-| 读章节 | GET | `/api/chapter/{id}` |
-| 保存章节 | PUT | `/api/chapter/{id}` |
-| 列出角色 | GET | `/api/characters` |
-| 创建角色 | POST | `/api/characters` |
-| 获取设定 | GET | `/api/setting` |
-| 更新设定 | POST | `/api/setting` |
-| 列出样例 | GET | `/api/samples` |
-| 通用命令 | POST | `/api/command` |
-| 写正文（AI） | POST | `/api/agent/write` |
-| 修改正文（AI） | POST | `/api/agent/revise` |
-| 评估正文（AI） | POST | `/api/agent/evaluate/{id}` |
-| 导出全文 | POST | `/api/export/txt` |
+# 安装依赖
+npm install
+
+# 在 OpenClaw 中注册
+openclaw plugins install ./packages/pnw-openclaw-plugin
+
+# 配置 Server URL（插件 configSchema 中设置）
+openclaw plugins config pnw-writer serverUrl=http://127.0.0.1:3000
+```
+
+插件注册后，Agent A 可直接调用 16 个原生工具：
+
+| 工具 | 说明 |
+| :--- | :--- |
+| `get_project` | 项目信息 |
+| `get_stats` | 统计 |
+| `get_outline` | 大纲树 |
+| `create_outline_phase` | 创建大纲卷 |
+| `create_outline_chapter` | 创建大纲章 |
+| `list_characters` | 角色列表 |
+| `create_character` | 创建角色 |
+| `get_setting` | 读设定 |
+| `update_setting` | 写设定 |
+| `list_chapters` | 章节列表 |
+| `read_chapter` | 读正文 |
+| `write_chapter` | 写正文（Agent B） |
+| `revise_chapter` | 修改（Agent B） |
+| `evaluate_chapter` | 评估（Agent B） |
+| `export_txt` | 导出全文 |
+| `list_samples` | 文风样例 |
 
 ### 方式二：CLI 直接调
 
@@ -135,11 +149,11 @@ pnw <command> [args]
 
 ### Agent A 入门指引
 
-1. 先读 `cli/src/skill.md` 了解 PNW 的数据模型和写作工作流
-2. 启动 PNW Server，获取项目信息
-3. 按推荐工作流编排：设定 → 大纲 → 正文 → 评估 → 修改
-4. 每步调用 REST API，LLM 生成的任务走 `/api/agent/*` 端点
-5. 参考下文「示例工作流」
+1. 先读 `docs/agent-a-playbook.md` — 这是你的**操作手册**，Step 0-8 告诉你一步步做什么
+2. 再读 `cli/src/skill.md` — 领域知识手册，理解数据模型和反模式
+3. 启动 PNW Server，用 `GET /api/health` 探活
+4. 用 `GET /api/tools` 发现当前 Server 支持的所有命令
+5. 按 playbook 编排：设定 → 大纲 → 正文 → 评估 → 修改
 
 ---
 
@@ -224,6 +238,37 @@ Agent A 的工作流：
 ```
 
 **评估：** `POST /api/agent/evaluate/{chapter_id}`
+
+---
+
+## 部署
+
+### 一键安装（Linux + systemd）
+
+```bash
+# 1. 下载 pnw 二进制到 /usr/local/bin/pnw
+# 2. 运行安装脚本
+sudo bash scripts/install-server.sh
+```
+
+脚本会：
+
+- 创建 `/opt/pnw` 数据目录
+- 生成 `.env` 配置文件
+- 安装 `pnw-server` systemd 服务（开机自启 + 崩溃重启）
+
+### 手动启动
+
+```bash
+pnw server --host 127.0.0.1 --port 3000 --project /path/to/project
+```
+
+### 健康检查
+
+```bash
+curl http://127.0.0.1:3000/api/health
+# → {"status":"ok","service":"pnw-server"}
+```
 
 ---
 
