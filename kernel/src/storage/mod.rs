@@ -66,7 +66,7 @@ fn walkdir(dir: &Path, count: &mut usize) -> Result<(), StorageError> {
         let path = entry.path();
         if path.is_dir() {
             walkdir(&path, count)?;
-        } else if path.extension().map_or(false, |e| e == "tmp") {
+        } else if path.extension().is_some_and(|e| e == "tmp") {
             fs::remove_file(&path)?;
             *count += 1;
         }
