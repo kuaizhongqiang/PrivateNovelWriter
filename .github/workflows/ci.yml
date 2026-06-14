@@ -1,7 +1,10 @@
 name: CI
 
 on:
-  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
 
 env:
   CARGO_TERM_COLOR: always
@@ -42,6 +45,12 @@ jobs:
 
       - name: Run tests
         run: cargo test --verbose
+
+      - name: Build OpenClaw plugin
+        run: |
+          cd packages/pnw-openclaw-plugin
+          npm ci
+          npm run build
 
   lint:
     runs-on: windows-latest
