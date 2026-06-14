@@ -28,7 +28,7 @@ fn wait_for_server(port: u16) {
 #[test]
 fn test_server_integration() {
     let pnw = server_binary_path();
-    let tmp = std::env::temp_dir().join("pnw_server_test");
+    let tmp = std::env::current_dir().unwrap().join("pnw_server_test");
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(&tmp).unwrap();
     std::env::set_current_dir(&tmp).unwrap();
@@ -136,7 +136,7 @@ fn test_server_integration() {
 #[test]
 fn test_e2e_full_workflow() {
     let pnw = binary_path();
-    let tmp = std::env::temp_dir().join("pnw_e2e_test");
+    let tmp = std::env::current_dir().unwrap().join("pnw_e2e_test");
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(&tmp).unwrap();
     std::env::set_current_dir(&tmp).unwrap();
