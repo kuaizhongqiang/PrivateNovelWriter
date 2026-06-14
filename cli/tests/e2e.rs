@@ -143,9 +143,8 @@ fn test_e2e_full_workflow() {
 
     let out = run(&pnw, &["novel", "new", "e2e-novel"]);
     assert!(out.contains("Created novel"), "create novel: {}", out);
-    // canonicalize after project exists to resolve Windows 8.3 short paths
-    let proj_path = std::fs::canonicalize(tmp.join("e2e-novel")).unwrap_or(tmp.join("e2e-novel"));
-    std::env::set_var("PNW_PROJECT", proj_path.to_str().unwrap());
+    // cd into project dir so get_project_path() finds project.db in CWD
+    std::env::set_current_dir(tmp.join("e2e-novel")).unwrap();
     let out = run(&pnw, &["novel", "show"]);
     assert!(out.contains("e2e-novel"), "show novel: {}", out);
     let out = run(
