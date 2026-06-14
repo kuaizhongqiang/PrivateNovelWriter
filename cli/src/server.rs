@@ -750,7 +750,6 @@ async fn api_command(
             let phase_id = body.args.get("phase_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
             let name = body.args.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
             let from_outline = body.args.get("from_outline").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            // Auto-compute file path
             let phase_name: String = handler.conn.query_row(
                 "SELECT name FROM text_phase WHERE id = ?1",
                 rusqlite::params![phase_id],
@@ -763,7 +762,15 @@ async fn api_command(
             if let Some(parent) = full_path.parent() {
                 std::fs::create_dir_all(parent).ok();
             }
-            DataCommand::CreateTextChapter { id: uuid::Uuid::new_v4().to_string(), phase_id, sort, name, file_path }
+            let tc_id = uuid::Uuid::new_v4().to_string();
+            // Link outline→text after creation
+            if !from_outline.is_empty() {
+                if let Ok(Some(mut oc)) = crud::get_outline_chapter(&handler.conn, &from_outline) {
+                    oc.text_chapter_id = Some(tc_id.clone());
+                    crud::update_outline_chapter(&handler.conn, &oc).ok();
+                }
+            }
+            DataCommand::CreateTextChapter { id: tc_id, phase_id, sort, name, file_path }
         }
         "write_setting" => {
             DataCommand::WriteSetting {
@@ -798,8 +805,9 @@ async fn api_command(
             let ops = crud::list_outline_phases(&handler.conn, &novel_id).unwrap_or_default();
             let mut result = Vec::new();
             for op in &ops {
-                let total = crud::list_outline_chapters(&handler.conn, &op.id).unwrap_or_default().len();
-                let written = total - crud::list_outline_chapters(&handler.conn, &op.id).unwrap_or_default().iter().filter(|c| c.text_chapter_id.is_none()).count();
+                let chs = crud::list_outline_chapters(&handler.conn, &op.id).unwrap_or_default();
+                let total = chs.len();
+                let written = chs.iter().filter(|c| c.text_chapter_id.is_some()).count();
                 result.push(serde_json::json!({
                     "phase_id": op.id, "phase_name": op.name,
                     "total_chapters": total, "written_chapters": written,
