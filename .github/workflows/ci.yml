@@ -23,7 +23,7 @@ jobs:
       - name: Build kernel + CLI
         run: cargo build -p pnw-kernel -p pnw --verbose
       - name: Run tests
-        run: cargo test --verbose
+        run: cargo test -p pnw-kernel -p pnw --verbose
 
   lint:
     runs-on: windows-latest
