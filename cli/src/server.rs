@@ -707,6 +707,7 @@ const GATEWAY_HTML: &str = r#"<!DOCTYPE html>
       <button class="nav-item active" data-view="dashboard">📊 总览</button>
       <button class="nav-item" data-view="outline">📂 大纲</button>
       <button class="nav-item" data-view="reader">📖 阅读</button>
+      <button class="nav-item" data-view="write">✍ 写作</button>
       <button class="nav-item" data-view="settings">⚙ 设定</button>
       <button class="nav-item" data-view="characters">👤 角色</button>
     </nav>
@@ -724,7 +725,28 @@ const GATEWAY_HTML: &str = r#"<!DOCTYPE html>
     <div id="view-reader" class="view">
       <h2>📖 阅读</h2>
       <div id="chapter-list"></div>
+      <div id="reader-nav" style="display:flex;gap:8px;margin:8px 0">
+        <button class="btn secondary" id="btn-prev" onclick="navChapter(-1)">← 上一章</button>
+        <button class="btn secondary" id="btn-next" onclick="navChapter(1)">下一章 →</button>
+      </div>
       <div id="chapter-content" class="reader-content"></div>
+    </div>
+    <div id="view-write" class="view">
+      <h2>✍ 写作</h2>
+      <div id="write-toolbar">
+        <select id="write-chapter-select" style="width:100%;padding:8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:14px;margin-bottom:12px">
+          <option value="">— 选择章节 —</option>
+        </select>
+        <div id="write-chapter-info" style="font-size:12px;color:var(--dim);margin-bottom:12px"></div>
+        <label style="font-size:12px;color:var(--dim);display:block;margin-bottom:4px">写作要求 / 反馈</label>
+        <textarea id="write-input" rows="4" style="width:100%;padding:8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:14px;resize:vertical;margin-bottom:8px;font-family:inherit" placeholder="输入写作要求或修改意见…"></textarea>
+        <div id="write-buttons" style="display:flex;gap:6px;flex-wrap:wrap">
+          <button class="btn" onclick="doWrite()">✍ 写正文</button>
+          <button class="btn secondary" onclick="doEvaluate()">📊 评估</button>
+          <button class="btn secondary" onclick="doRevise()">🔄 修改</button>
+        </div>
+        <div id="write-status" style="margin-top:12px;padding:12px;border-radius:6px;background:var(--bg2);border:1px solid var(--border);white-space:pre-wrap;font-size:13px;min-height:40px;display:none"></div>
+      </div>
     </div>
     <div id="view-settings" class="view">
       <h2>⚙ 设定管理</h2>
@@ -774,7 +796,8 @@ h2{font-size:20px;margin-bottom:16px}
 .setting-field label{display:block;font-size:12px;color:var(--dim);margin-bottom:4px}
 .setting-field input,.setting-field textarea{width:100%;padding:8px 12px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);font-size:14px}
 .setting-field textarea{min-height:80px;resize:vertical}
-.btn{padding:8px 16px;background:var(--accent);color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer}
+.btn{padding:8px 16px;background:var(--accent);color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer;transition:opacity .15s}
+.btn:hover{opacity:.85}.btn.secondary{background:var(--bg3);color:var(--text);border:1px solid var(--border)}.btn.secondary:hover{background:var(--border)}
 .progress-bar{height:6px;background:var(--border);border-radius:3px;overflow:hidden;margin-top:8px}
 .progress-bar .fill{height:100%;background:var(--accent);border-radius:3px;transition:width .5s}"#;
 
@@ -847,27 +870,99 @@ async function loadOutline() {
 async function loadReader() {
   const res = await api('/chapters');
   if (res.status !== 'ok') return;
-  const chs = res.data || [];
-  document.getElementById('chapter-list').innerHTML = chs.map(ch =>
+  state.chapters = res.data || [];
+  document.getElementById('chapter-list').innerHTML = state.chapters.map(ch =>
     `<button onclick="showChapter('${ch.id}')">${ch.name}</button>`
   ).join('');
+  // Also populate writing chapter selector
+  const sel = document.getElementById('write-chapter-select');
+  if (sel) {
+    sel.innerHTML = '<option value="">— 选择章节 —</option>' +
+      state.chapters.map(ch => `<option value="${ch.id}">${ch.name} (${ch.word_count}字)</option>`).join('');
+  }
 }
 
 async function showChapter(id) {
   const res = await api('/chapter/' + id);
   if (res.status !== 'ok') return;
   const ch = res.data;
+  state.currentChapterIdx = state.chapters?.findIndex(c => c.id === id) ?? -1;
   document.getElementById('chapter-content').innerHTML =
-    `<h3>${ch.name}</h3><p style="color:var(--dim);font-size:12px;margin:8px 0">${ch.word_count} 字</p>
+    `<h3>${ch.name}</h3><p style="color:var(--dim);font-size:12px;margin:8px 0">${ch.word_count} 字 · ${ch.phase_name||''}</p>
      <div class="reader-content">${escHtml(ch.content || '(空)')}</div>`;
   document.querySelectorAll('#chapter-list button').forEach(b => b.style.borderColor = '');
   const btn = document.querySelectorAll('#chapter-list button');
   for (let i = 0; i < btn.length; i++) {
     if (btn[i].textContent.includes(ch.name)) { btn[i].style.borderColor = 'var(--accent)'; break; }
   }
+  document.getElementById('btn-prev').style.display = state.currentChapterIdx > 0 ? '' : 'none';
+  document.getElementById('btn-next').style.display = state.currentChapterIdx < (state.chapters?.length||0) - 1 ? '' : 'none';
+}
+
+function navChapter(dir) {
+  const idx = (state.currentChapterIdx ?? -1) + dir;
+  if (idx >= 0 && state.chapters && idx < state.chapters.length) {
+    showChapter(state.chapters[idx].id);
+  }
 }
 
 function openChapter(id) { showChapter(id); switchView('reader'); }
+
+// ── Writing functions ──
+
+function getWriteChapterId() {
+  const sel = document.getElementById('write-chapter-select');
+  return sel?.value || '';
+}
+
+function showWriteStatus(msg, isError) {
+  const el = document.getElementById('write-status');
+  el.style.display = 'block';
+  el.style.color = isError ? '#ef4444' : 'var(--text)';
+  el.textContent = msg;
+}
+
+async function doWrite() {
+  const cid = getWriteChapterId();
+  if (!cid) { showWriteStatus('请先选择章节', true); return; }
+  const brief = document.getElementById('write-input').value;
+  if (!brief) { showWriteStatus('请输入写作要求', true); return; }
+  showWriteStatus('⏳ Agent B 正在写作中…');
+  const res = await api('/agent/write', { method: 'POST', body: JSON.stringify({ chapter_id: cid, brief }) });
+  if (res.status === 'ok') {
+    showWriteStatus('✅ ' + (res.summary || '写作完成'));
+    await loadStats(); await loadReader();
+  } else {
+    showWriteStatus('❌ ' + (res.error || '写作失败'), true);
+  }
+}
+
+async function doEvaluate() {
+  const cid = getWriteChapterId();
+  if (!cid) { showWriteStatus('请先选择章节', true); return; }
+  showWriteStatus('⏳ 评估中…');
+  const res = await api('/agent/evaluate/' + cid, { method: 'POST' });
+  if (res.status === 'ok') {
+    showWriteStatus('📊 评估结果:\n' + (res.summary || '完成'));
+  } else {
+    showWriteStatus('❌ ' + (res.error || '评估失败'), true);
+  }
+}
+
+async function doRevise() {
+  const cid = getWriteChapterId();
+  if (!cid) { showWriteStatus('请先选择章节', true); return; }
+  const feedback = document.getElementById('write-input').value;
+  if (!feedback) { showWriteStatus('请输入修改意见', true); return; }
+  showWriteStatus('⏳ Agent B 正在修改…');
+  const res = await api('/agent/revise', { method: 'POST', body: JSON.stringify({ chapter_id: cid, feedback }) });
+  if (res.status === 'ok') {
+    showWriteStatus('✅ 修改完成: ' + (res.summary || ''));
+    await loadStats();
+  } else {
+    showWriteStatus('❌ ' + (res.error || '修改失败'), true);
+  }
+}
 
 function switchView(name) {
   document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
@@ -915,9 +1010,9 @@ async function saveSetting() {
 document.querySelectorAll('.nav-item').forEach(el => {
   el.addEventListener('click', () => {
     switchView(el.dataset.view);
-    if (el.dataset.view === 'reader') loadReader();
+    if (el.dataset.view === 'reader' || el.dataset.view === 'write') loadReader();
   });
 });
 
-(async () => { await loadStats(); await loadDashboard(); await loadOutline(); await loadCharacters(); await loadSetting(); })();
+(async () => { await loadStats(); await loadDashboard(); await loadOutline(); await loadCharacters(); await loadSetting(); await loadReader(); })();
 "#;
