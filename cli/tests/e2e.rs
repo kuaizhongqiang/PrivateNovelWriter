@@ -37,7 +37,9 @@ fn test_server_integration() {
     assert!(out.contains("Created novel"), "create novel: {}", out);
 
     let port = 19191 + (std::process::id() % 1000) as u16;
-    let proj_path = std::fs::canonicalize(tmp.join("server-test")).unwrap_or(tmp.join("server-test"));
+    // canonicalize after project exists to resolve Windows 8.3 short paths
+    let proj_path =
+        std::fs::canonicalize(tmp.join("server-test")).unwrap_or(tmp.join("server-test"));
     let mut server = Command::new(&pnw)
         .args([
             "server",
@@ -138,11 +140,12 @@ fn test_e2e_full_workflow() {
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(&tmp).unwrap();
     std::env::set_current_dir(&tmp).unwrap();
-    let proj_path = std::fs::canonicalize(tmp.join("e2e-novel")).unwrap_or(tmp.join("e2e-novel"));
-    std::env::set_var("PNW_PROJECT", proj_path.to_str().unwrap());
 
     let out = run(&pnw, &["novel", "new", "e2e-novel"]);
     assert!(out.contains("Created novel"), "create novel: {}", out);
+    // canonicalize after project exists to resolve Windows 8.3 short paths
+    let proj_path = std::fs::canonicalize(tmp.join("e2e-novel")).unwrap_or(tmp.join("e2e-novel"));
+    std::env::set_var("PNW_PROJECT", proj_path.to_str().unwrap());
     let out = run(&pnw, &["novel", "show"]);
     assert!(out.contains("e2e-novel"), "show novel: {}", out);
     let out = run(
