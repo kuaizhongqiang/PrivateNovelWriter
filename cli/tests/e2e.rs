@@ -113,12 +113,7 @@ fn test_server_integration() {
     );
 
     // Gateway UI
-    let html = client
-        .get(base.to_string())
-        .send()
-        .unwrap()
-        .text()
-        .unwrap();
+    let html = client.get(base.to_string()).send().unwrap().text().unwrap();
     assert!(html.contains("PNW Gateway"));
 
     // Cleanup
