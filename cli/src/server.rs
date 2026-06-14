@@ -44,7 +44,12 @@ struct ApiResponse<T: Serialize> {
 
 impl<T: Serialize> ApiResponse<T> {
     fn ok(data: T) -> Self {
-        Self { status: "ok".into(), data: Some(data), error: None, error_code: None }
+        Self {
+            status: "ok".into(),
+            data: Some(data),
+            error: None,
+            error_code: None,
+        }
     }
 }
 
@@ -116,8 +121,8 @@ pub async fn run_server(host: &str, port: u16, project: Option<&str>, cors_origi
     }
 
     // Verify DB can be opened
-    let conn = rusqlite::Connection::open(project_path.join("project.db"))
-        .expect("Cannot open database");
+    let conn =
+        rusqlite::Connection::open(project_path.join("project.db")).expect("Cannot open database");
     schema::init_schema(&conn).expect("Cannot init schema");
     drop(conn);
 
@@ -150,9 +155,18 @@ pub async fn run_server(host: &str, port: u16, project: Option<&str>, cors_origi
         .route("/api/project", get(api_project))
         .route("/api/outline", get(api_outline))
         .route("/api/chapters", get(api_chapters))
-        .route("/api/chapter/{id}", get(api_chapter_get).put(api_chapter_save))
-        .route("/api/characters", get(api_characters_list).post(api_character_create))
-        .route("/api/setting", get(api_setting_get).post(api_setting_update))
+        .route(
+            "/api/chapter/{id}",
+            get(api_chapter_get).put(api_chapter_save),
+        )
+        .route(
+            "/api/characters",
+            get(api_characters_list).post(api_character_create),
+        )
+        .route(
+            "/api/setting",
+            get(api_setting_get).post(api_setting_update),
+        )
         .route("/api/samples", get(api_samples_list))
         .route("/api/stats", get(api_stats))
         .route("/api/agent/write", post(api_agent_write))
@@ -181,12 +195,23 @@ pub async fn run_server(host: &str, port: u16, project: Option<&str>, cors_origi
 
 // ─── Gateway UI ───
 
-async fn gateway_index() -> Html<&'static str> { Html(GATEWAY_HTML) }
+async fn gateway_index() -> Html<&'static str> {
+    Html(GATEWAY_HTML)
+}
 async fn gateway_css() -> impl IntoResponse {
-    ([(axum::http::header::CONTENT_TYPE, "text/css; charset=utf-8")], GATEWAY_CSS)
+    (
+        [(axum::http::header::CONTENT_TYPE, "text/css; charset=utf-8")],
+        GATEWAY_CSS,
+    )
 }
 async fn gateway_js() -> impl IntoResponse {
-    ([(axum::http::header::CONTENT_TYPE, "application/javascript; charset=utf-8")], GATEWAY_JS)
+    (
+        [(
+            axum::http::header::CONTENT_TYPE,
+            "application/javascript; charset=utf-8",
+        )],
+        GATEWAY_JS,
+    )
 }
 
 // ─── API handlers ───
@@ -284,7 +309,10 @@ async fn api_outline(State(state): State<Arc<AppState>>) -> Json<ApiResponse<ser
         Ok(id) => id,
         Err(e) => return api_err(e),
     };
-    match handler.execute(DataCommand::GetOutlineTree { novel_id, phase_id: None }) {
+    match handler.execute(DataCommand::GetOutlineTree {
+        novel_id,
+        phase_id: None,
+    }) {
         Ok(output) => Json(ApiResponse::from_output(output)),
         Err(e) => api_err(e.to_string()),
     }
@@ -339,7 +367,9 @@ async fn api_chapter_get(
 }
 
 #[derive(Deserialize)]
-struct SaveBody { content: String }
+struct SaveBody {
+    content: String,
+}
 
 async fn api_chapter_save(
     State(state): State<Arc<AppState>>,
@@ -363,19 +393,36 @@ async fn api_chapter_save(
     let mut updated = tc;
     updated.word_count = wc;
     crud::update_text_chapter(&handler.conn, &updated).ok();
-    Json(ApiResponse { status: "ok".into(), data: Some("saved"), error: None, error_code: None })
+    Json(ApiResponse {
+        status: "ok".into(),
+        data: Some("saved"),
+        error: None,
+        error_code: None,
+    })
 }
 
 impl ApiResponse<&'static str> {
     fn err_inner(msg: impl ToString) -> Self {
-        Self { status: "error".into(), data: None, error: Some(msg.to_string()), error_code: None }
+        Self {
+            status: "error".into(),
+            data: None,
+            error: Some(msg.to_string()),
+            error_code: None,
+        }
     }
     fn err_code(msg: impl ToString, code: &str) -> Self {
-        Self { status: "error".into(), data: None, error: Some(msg.to_string()), error_code: Some(code.to_string()) }
+        Self {
+            status: "error".into(),
+            data: None,
+            error: Some(msg.to_string()),
+            error_code: Some(code.to_string()),
+        }
     }
 }
 
-async fn api_characters_list(State(state): State<Arc<AppState>>) -> Json<ApiResponse<serde_json::Value>> {
+async fn api_characters_list(
+    State(state): State<Arc<AppState>>,
+) -> Json<ApiResponse<serde_json::Value>> {
     let handler = match open_fresh_handler(&state) {
         Ok(h) => h,
         Err(e) => return api_err(e),
@@ -400,7 +447,9 @@ struct CreateCharBody {
     #[serde(default)]
     relationship: String,
 }
-fn two() -> i32 { 2 }
+fn two() -> i32 {
+    2
+}
 
 async fn api_character_create(
     State(state): State<Arc<AppState>>,
@@ -416,15 +465,21 @@ async fn api_character_create(
     };
     let id = uuid::Uuid::new_v4().to_string();
     match handler.execute(DataCommand::CreateCharacter {
-        id, novel_id, name: body.name, char_type: body.char_type,
-        age: body.age, relationship: body.relationship,
+        id,
+        novel_id,
+        name: body.name,
+        char_type: body.char_type,
+        age: body.age,
+        relationship: body.relationship,
     }) {
         Ok(output) => Json(ApiResponse::from_output(output)),
         Err(e) => api_err(e.to_string()),
     }
 }
 
-async fn api_setting_get(State(state): State<Arc<AppState>>) -> Json<ApiResponse<serde_json::Value>> {
+async fn api_setting_get(
+    State(state): State<Arc<AppState>>,
+) -> Json<ApiResponse<serde_json::Value>> {
     let handler = match open_fresh_handler(&state) {
         Ok(h) => h,
         Err(e) => return api_err(e),
@@ -463,11 +518,25 @@ async fn api_setting_update(
     let existing = crud::get_setting(&handler.conn, &novel_id).ok().flatten();
     let cmd = DataCommand::WriteSetting {
         novel_id: novel_id.clone(),
-        title: body.title.unwrap_or_else(|| existing.as_ref().map_or(String::new(), |s| s.title.clone())),
-        inspiration: body.inspiration.unwrap_or_else(|| existing.as_ref().map_or(String::new(), |s| s.inspiration.clone())),
-        description: body.description.unwrap_or_else(|| existing.as_ref().map_or(String::new(), |s| s.description.clone())),
-        novel_type: body.novel_type.unwrap_or_else(|| existing.as_ref().map_or(0, |s| s.novel_type.to_i32())),
-        tags: body.tags.unwrap_or_else(|| existing.as_ref().map_or(vec![], |s| s.tags.clone())),
+        title: body
+            .title
+            .unwrap_or_else(|| existing.as_ref().map_or(String::new(), |s| s.title.clone())),
+        inspiration: body.inspiration.unwrap_or_else(|| {
+            existing
+                .as_ref()
+                .map_or(String::new(), |s| s.inspiration.clone())
+        }),
+        description: body.description.unwrap_or_else(|| {
+            existing
+                .as_ref()
+                .map_or(String::new(), |s| s.description.clone())
+        }),
+        novel_type: body
+            .novel_type
+            .unwrap_or_else(|| existing.as_ref().map_or(0, |s| s.novel_type.to_i32())),
+        tags: body
+            .tags
+            .unwrap_or_else(|| existing.as_ref().map_or(vec![], |s| s.tags.clone())),
     };
     match handler.execute(cmd) {
         Ok(output) => Json(ApiResponse::from_output(output)),
@@ -475,7 +544,9 @@ async fn api_setting_update(
     }
 }
 
-async fn api_samples_list(State(state): State<Arc<AppState>>) -> Json<ApiResponse<serde_json::Value>> {
+async fn api_samples_list(
+    State(state): State<Arc<AppState>>,
+) -> Json<ApiResponse<serde_json::Value>> {
     let handler = match open_fresh_handler(&state) {
         Ok(h) => h,
         Err(e) => return api_err(e),
@@ -509,7 +580,9 @@ async fn api_stats(State(state): State<Arc<AppState>>) -> Json<ApiResponse<serde
     for p in &phases {
         if let Ok(chs) = crud::list_text_chapters(&handler.conn, &p.id) {
             written_chapters += chs.len();
-            for ch in &chs { total_written += ch.word_count; }
+            for ch in &chs {
+                total_written += ch.word_count;
+            }
         }
     }
     let ops = crud::list_outline_phases(&handler.conn, &novel_id).unwrap_or_default();
@@ -519,7 +592,11 @@ async fn api_stats(State(state): State<Arc<AppState>>) -> Json<ApiResponse<serde
             planned += chs.len();
         }
     }
-    let pct = if novel.total_char > 0 { (total_written as f64 / novel.total_char as f64 * 1000.0).round() / 10.0 } else { 0.0 };
+    let pct = if novel.total_char > 0 {
+        (total_written as f64 / novel.total_char as f64 * 1000.0).round() / 10.0
+    } else {
+        0.0
+    };
     api_ok(serde_json::json!({
         "novel_name": novel.name, "total_char_target": novel.total_char,
         "chapter_char_target": novel.chapter_char, "total_written": total_written,
@@ -531,7 +608,10 @@ async fn api_stats(State(state): State<Arc<AppState>>) -> Json<ApiResponse<serde
 // ─── Agent handlers ───
 
 #[derive(Deserialize)]
-struct AgentWriteBody { chapter_id: String, brief: String }
+struct AgentWriteBody {
+    chapter_id: String,
+    brief: String,
+}
 
 async fn api_agent_write(
     State(state): State<Arc<AppState>>,
@@ -542,33 +622,53 @@ async fn api_agent_write(
         let conn = rusqlite::Connection::open(state.project_path.join("project.db")).unwrap();
         active_novel_id(&conn).unwrap_or_default()
     };
-    let cmd = AgentCommand::WriteChapter { novel_id, chapter_id: body.chapter_id, brief: body.brief };
+    let cmd = AgentCommand::WriteChapter {
+        novel_id,
+        chapter_id: body.chapter_id,
+        brief: body.brief,
+    };
     match tokio::task::spawn_blocking(move || {
         let rt = tokio::runtime::Runtime::new().unwrap();
         let conn = rusqlite::Connection::open(pp.join("project.db")).unwrap();
         rt.block_on(pnw_kernel::agent::execute_agent_command(&conn, &pp, cmd))
-    }).await.unwrap() {
+    })
+    .await
+    .unwrap()
+    {
         Ok(s) => Json(serde_json::json!({"status":"ok","data":{"summary":s}})),
-        Err(e) => Json(serde_json::json!({"status":"error","error":e.to_string(),"error_code":"LLM_ERROR"})),
+        Err(e) => Json(
+            serde_json::json!({"status":"error","error":e.to_string(),"error_code":"LLM_ERROR"}),
+        ),
     }
 }
 
 #[derive(Deserialize)]
-struct AgentReviseBody { chapter_id: String, feedback: String }
+struct AgentReviseBody {
+    chapter_id: String,
+    feedback: String,
+}
 
 async fn api_agent_revise(
     State(state): State<Arc<AppState>>,
     Json(body): Json<AgentReviseBody>,
 ) -> Json<serde_json::Value> {
     let pp = state.project_path.clone();
-    let cmd = AgentCommand::ReviseChapter { chapter_id: body.chapter_id, feedback: body.feedback };
+    let cmd = AgentCommand::ReviseChapter {
+        chapter_id: body.chapter_id,
+        feedback: body.feedback,
+    };
     match tokio::task::spawn_blocking(move || {
         let rt = tokio::runtime::Runtime::new().unwrap();
         let conn = rusqlite::Connection::open(pp.join("project.db")).unwrap();
         rt.block_on(pnw_kernel::agent::execute_agent_command(&conn, &pp, cmd))
-    }).await.unwrap() {
+    })
+    .await
+    .unwrap()
+    {
         Ok(s) => Json(serde_json::json!({"status":"ok","data":{"summary":s}})),
-        Err(e) => Json(serde_json::json!({"status":"error","error":e.to_string(),"error_code":"LLM_ERROR"})),
+        Err(e) => Json(
+            serde_json::json!({"status":"error","error":e.to_string(),"error_code":"LLM_ERROR"}),
+        ),
     }
 }
 
@@ -582,9 +682,14 @@ async fn api_agent_evaluate(
         let rt = tokio::runtime::Runtime::new().unwrap();
         let conn = rusqlite::Connection::open(pp.join("project.db")).unwrap();
         rt.block_on(pnw_kernel::agent::execute_agent_command(&conn, &pp, cmd))
-    }).await.unwrap() {
+    })
+    .await
+    .unwrap()
+    {
         Ok(s) => Json(serde_json::json!({"status":"ok","data":{"summary":s}})),
-        Err(e) => Json(serde_json::json!({"status":"error","error":e.to_string(),"error_code":"LLM_ERROR"})),
+        Err(e) => Json(
+            serde_json::json!({"status":"error","error":e.to_string(),"error_code":"LLM_ERROR"}),
+        ),
     }
 }
 
@@ -595,7 +700,10 @@ struct ExportQuery {
     limit: Option<usize>,
 }
 
-async fn api_export_txt(State(state): State<Arc<AppState>>, Query(q): Query<ExportQuery>) -> Json<serde_json::Value> {
+async fn api_export_txt(
+    State(state): State<Arc<AppState>>,
+    Query(q): Query<ExportQuery>,
+) -> Json<serde_json::Value> {
     let handler = match open_fresh_handler(&state) {
         Ok(h) => h,
         Err(e) => return Json(serde_json::json!({"status":"error","error":e})),
@@ -621,11 +729,16 @@ async fn api_export_txt(State(state): State<Arc<AppState>>, Query(q): Query<Expo
     }
     all_chapters.sort_by(|a, b| a.2.cmp(&b.2));
     let count = all_chapters.len();
-    let limited = q.limit.map(|l| &all_chapters[..l.min(count)]).unwrap_or(&all_chapters);
-    let merged: String = limited.iter().fold(String::new(), |mut acc, (pn, cn, _, c)| {
-        acc.push_str(&format!("【{}】{}\n\n{}\n\n", pn, cn, c));
-        acc
-    });
+    let limited = q
+        .limit
+        .map(|l| &all_chapters[..l.min(count)])
+        .unwrap_or(&all_chapters);
+    let merged: String = limited
+        .iter()
+        .fold(String::new(), |mut acc, (pn, cn, _, c)| {
+            acc.push_str(&format!("【{}】{}\n\n{}\n\n", pn, cn, c));
+            acc
+        });
     let wc = merged.chars().filter(|c| !c.is_whitespace()).count() as u64;
     Json(serde_json::json!({
         "status":"ok",
@@ -679,7 +792,10 @@ async fn api_command(
 
     let cmd = match body.command.as_str() {
         // Read commands
-        "get_outline" => DataCommand::GetOutlineTree { novel_id, phase_id: None },
+        "get_outline" => DataCommand::GetOutlineTree {
+            novel_id,
+            phase_id: None,
+        },
         "get_novel" => DataCommand::GetNovel { id: novel_id },
         "list_characters" => DataCommand::ListCharacters { novel_id },
         "get_setting" => DataCommand::GetSetting { novel_id },
@@ -688,73 +804,170 @@ async fn api_command(
         "list_outline_phases" => DataCommand::ListOutlinePhases { novel_id },
         "list_text_phases" => DataCommand::ListTextPhases { novel_id },
         "list_text_chapters" => {
-            let pid = body.args.get("phase_id").and_then(|v| v.as_str()).unwrap_or("");
-            DataCommand::ListTextChapters { phase_id: pid.to_string() }
+            let pid = body
+                .args
+                .get("phase_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            DataCommand::ListTextChapters {
+                phase_id: pid.to_string(),
+            }
         }
         "list_outline_chapters" => {
-            let pid = body.args.get("phase_id").and_then(|v| v.as_str()).unwrap_or("");
-            DataCommand::ListOutlineChapters { phase_id: pid.to_string() }
+            let pid = body
+                .args
+                .get("phase_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            DataCommand::ListOutlineChapters {
+                phase_id: pid.to_string(),
+            }
         }
         // Write commands
         "create_outline_phase" => {
-            let name = body.args.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let name = body
+                .args
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
             let phases = crud::list_outline_phases(&handler.conn, &novel_id).unwrap_or_default();
             let sort = phases.iter().map(|p| p.sort).max().unwrap_or(-1) + 1;
             DataCommand::CreateOutlinePhase {
-                id: uuid::Uuid::new_v4().to_string(), novel_id, sort,
-                name, description: String::new(),
+                id: uuid::Uuid::new_v4().to_string(),
+                novel_id,
+                sort,
+                name,
+                description: String::new(),
             }
         }
         "create_outline_chapter" => {
-            let name = body.args.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let pid = body.args.get("phase_id").and_then(|v| v.as_str()).unwrap_or("");
-            let content = body.args.get("content").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let hook = body.args.get("hook").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let name = body
+                .args
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let pid = body
+                .args
+                .get("phase_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let content = body
+                .args
+                .get("content")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let hook = body
+                .args
+                .get("hook")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
             let chs = crud::list_outline_chapters(&handler.conn, pid).unwrap_or_default();
             let sort = chs.iter().map(|c| c.sort).max().unwrap_or(-1) + 1;
             DataCommand::CreateOutlineChapter {
-                id: uuid::Uuid::new_v4().to_string(), phase_id: pid.to_string(),
-                sort, chapter_name: name, content, hook,
+                id: uuid::Uuid::new_v4().to_string(),
+                phase_id: pid.to_string(),
+                sort,
+                chapter_name: name,
+                content,
+                hook,
             }
         }
-        "create_character" => {
-            DataCommand::CreateCharacter {
-                id: uuid::Uuid::new_v4().to_string(), novel_id,
-                name: body.args.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-                char_type: body.args.get("char_type").and_then(|v| v.as_i64()).unwrap_or(2) as i32,
-                age: body.args.get("age").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
-                relationship: body.args.get("relationship").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-            }
-        }
+        "create_character" => DataCommand::CreateCharacter {
+            id: uuid::Uuid::new_v4().to_string(),
+            novel_id,
+            name: body
+                .args
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
+            char_type: body
+                .args
+                .get("char_type")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(2) as i32,
+            age: body.args.get("age").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
+            relationship: body
+                .args
+                .get("relationship")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
+        },
         "create_text_phase" => {
-            let name = body.args.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let name = body
+                .args
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
             let phases = crud::list_text_phases(&handler.conn, &novel_id).unwrap_or_default();
             let sort = phases.iter().map(|p| p.sort).max().unwrap_or(-1) + 1;
             DataCommand::CreateTextPhase {
-                id: uuid::Uuid::new_v4().to_string(), novel_id: novel_id.clone(), sort, name,
+                id: uuid::Uuid::new_v4().to_string(),
+                novel_id: novel_id.clone(),
+                sort,
+                name,
             }
         }
         "delete_character" => {
-            let id = body.args.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let id = body
+                .args
+                .get("id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
             DataCommand::DeleteCharacter { id }
         }
         "delete_outline_phase" => {
-            let phase_id = body.args.get("phase_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let phase_id = body
+                .args
+                .get("phase_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
             DataCommand::DeleteOutlinePhase { phase_id }
         }
         "delete_outline_chapter" => {
-            let id = body.args.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let id = body
+                .args
+                .get("id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
             DataCommand::DeleteOutlineChapter { id }
         }
         "create_text_chapter" => {
-            let phase_id = body.args.get("phase_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let name = body.args.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let from_outline = body.args.get("from_outline").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let phase_name: String = handler.conn.query_row(
-                "SELECT name FROM text_phase WHERE id = ?1",
-                rusqlite::params![phase_id],
-                |row| row.get(0),
-            ).unwrap_or_else(|_| "unknown".to_string());
+            let phase_id = body
+                .args
+                .get("phase_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let name = body
+                .args
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let from_outline = body
+                .args
+                .get("from_outline")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let phase_name: String = handler
+                .conn
+                .query_row(
+                    "SELECT name FROM text_phase WHERE id = ?1",
+                    rusqlite::params![phase_id],
+                    |row| row.get(0),
+                )
+                .unwrap_or_else(|_| "unknown".to_string());
             let chs = crud::list_text_chapters(&handler.conn, &phase_id).unwrap_or_default();
             let sort = chs.iter().map(|c| c.sort).max().unwrap_or(-1) + 1;
             let file_path = format!("text/{}/ch-{:03}.txt", phase_name, sort);
@@ -770,18 +983,50 @@ async fn api_command(
                     crud::update_outline_chapter(&handler.conn, &oc).ok();
                 }
             }
-            DataCommand::CreateTextChapter { id: tc_id, phase_id, sort, name, file_path }
-        }
-        "write_setting" => {
-            DataCommand::WriteSetting {
-                novel_id,
-                title: body.args.get("title").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-                inspiration: body.args.get("inspiration").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-                description: body.args.get("description").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-                novel_type: body.args.get("novel_type").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
-                tags: body.args.get("tags").and_then(|v| v.as_array()).map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect()).unwrap_or_default(),
+            DataCommand::CreateTextChapter {
+                id: tc_id,
+                phase_id,
+                sort,
+                name,
+                file_path,
             }
         }
+        "write_setting" => DataCommand::WriteSetting {
+            novel_id,
+            title: body
+                .args
+                .get("title")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
+            inspiration: body
+                .args
+                .get("inspiration")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
+            description: body
+                .args
+                .get("description")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
+            novel_type: body
+                .args
+                .get("novel_type")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(0) as i32,
+            tags: body
+                .args
+                .get("tags")
+                .and_then(|v| v.as_array())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
+                .unwrap_or_default(),
+        },
         // Cross-entity queries
         "get_unwritten_chapters" => {
             let ops = crud::list_outline_phases(&handler.conn, &novel_id).unwrap_or_default();
@@ -823,7 +1068,11 @@ async fn api_command(
             if let Some(ref rid) = body.client_request_id {
                 if !rid.is_empty() {
                     let val = serde_json::to_value(output).unwrap_or_default();
-                    state.idempotent_results.lock().await.insert(rid.clone(), val);
+                    state
+                        .idempotent_results
+                        .lock()
+                        .await
+                        .insert(rid.clone(), val);
                 }
             }
             Json(ApiResponse::from_output(output.clone()))

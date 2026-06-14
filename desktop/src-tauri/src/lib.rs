@@ -28,7 +28,11 @@ fn server_api(state: &AppState, path: &str) -> Result<serde_json::Value, String>
     resp.json().map_err(|e| format!("JSON error: {}", e))
 }
 
-fn server_api_post(state: &AppState, path: &str, body: serde_json::Value) -> Result<serde_json::Value, String> {
+fn server_api_post(
+    state: &AppState,
+    path: &str,
+    body: serde_json::Value,
+) -> Result<serde_json::Value, String> {
     let url = format!("{}{}", state.server_url.lock().unwrap(), path);
     let client = reqwest::blocking::Client::new();
     let resp = client
@@ -426,7 +430,11 @@ fn list_samples(state: State<AppState>) -> Result<serde_json::Value, String> {
 #[tauri::command]
 fn get_plugin(state: State<AppState>) -> Result<serde_json::Value, String> {
     if *state.mode.lock().unwrap() == "server" {
-        return server_api_post(&state, "/api/command", serde_json::json!({"command": "get_plugin"}));
+        return server_api_post(
+            &state,
+            "/api/command",
+            serde_json::json!({"command": "get_plugin"}),
+        );
     }
     let handler = ensure_handler(&state)?;
     let novel_id = active_novel_id(&handler.conn)?;
@@ -513,11 +521,15 @@ fn parse_args() -> (String, String) {
         match args[i].as_str() {
             "--mode" | "-m" => {
                 i += 1;
-                if i < args.len() { mode = args[i].clone(); }
+                if i < args.len() {
+                    mode = args[i].clone();
+                }
             }
             "--server-url" | "-u" => {
                 i += 1;
-                if i < args.len() { server_url = args[i].clone(); }
+                if i < args.len() {
+                    server_url = args[i].clone();
+                }
             }
             _ => {}
         }

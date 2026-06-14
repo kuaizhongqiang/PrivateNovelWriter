@@ -440,7 +440,12 @@ async fn main() {
         // Agent 命令需要异步执行
         Commands::Chapter { action } => handle_chapter_agent(action).await,
         Commands::Evaluate { id } => handle_evaluate(id).await,
-        Commands::Server { host, port, project, cors_origin } => {
+        Commands::Server {
+            host,
+            port,
+            project,
+            cors_origin,
+        } => {
             server::run_server(host, *port, project.as_deref(), cors_origin).await;
         }
         other => {
@@ -993,14 +998,10 @@ fn handle_export(
             // Use merge_write for atomic export
             let tmp_path = out_path.with_extension("tmp");
             std::fs::write(&tmp_path, &merged).map_err(|e| {
-                pnw_kernel::handler::HandlerError::Storage(
-                    pnw_kernel::storage::StorageError::Io(e),
-                )
+                pnw_kernel::handler::HandlerError::Storage(pnw_kernel::storage::StorageError::Io(e))
             })?;
             std::fs::rename(&tmp_path, &out_path).map_err(|e| {
-                pnw_kernel::handler::HandlerError::Storage(
-                    pnw_kernel::storage::StorageError::Io(e),
-                )
+                pnw_kernel::handler::HandlerError::Storage(pnw_kernel::storage::StorageError::Io(e))
             })?;
 
             Ok(Output::Status(format!(

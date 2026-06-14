@@ -11,7 +11,9 @@ fn wait_for_server(port: u16) {
     let url = format!("http://127.0.0.1:{}/api/status", port);
     for _ in 0..30 {
         if let Ok(resp) = reqwest::blocking::get(&url) {
-            if resp.status().is_success() { return; }
+            if resp.status().is_success() {
+                return;
+            }
         }
         std::thread::sleep(std::time::Duration::from_millis(500));
     }
@@ -35,7 +37,13 @@ fn test_server_integration() {
 
     let port = 19191 + (std::process::id() % 1000) as u16;
     let mut server = Command::new(&pnw)
-        .args(&["server", "--port", &port.to_string(), "--project", tmp.join("server-test").to_str().unwrap()])
+        .args(&[
+            "server",
+            "--port",
+            &port.to_string(),
+            "--project",
+            tmp.join("server-test").to_str().unwrap(),
+        ])
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .spawn()
@@ -49,7 +57,12 @@ fn test_server_integration() {
     let base = format!("http://127.0.0.1:{}", port);
     let client = reqwest::blocking::Client::new();
     let get = |path: &str| -> serde_json::Value {
-        client.get(&format!("{}{}", base, path)).send().unwrap().json().unwrap()
+        client
+            .get(&format!("{}{}", base, path))
+            .send()
+            .unwrap()
+            .json()
+            .unwrap()
     };
 
     // All GET endpoints
@@ -69,20 +82,43 @@ fn test_server_integration() {
 
     // POST /api/command
     assert_eq!(
-        client.post(&format!("{}/api/command", base))
+        client
+            .post(&format!("{}/api/command", base))
             .json(&serde_json::json!({"command": "get_novel"}))
-            .send().unwrap().json::<serde_json::Value>().unwrap()["status"], "ok");
+            .send()
+            .unwrap()
+            .json::<serde_json::Value>()
+            .unwrap()["status"],
+        "ok"
+    );
     assert_eq!(
-        client.post(&format!("{}/api/command", base))
+        client
+            .post(&format!("{}/api/command", base))
             .json(&serde_json::json!({"command": "create_character", "args": {"name": "测试角色"}}))
-            .send().unwrap().json::<serde_json::Value>().unwrap()["status"], "ok");
+            .send()
+            .unwrap()
+            .json::<serde_json::Value>()
+            .unwrap()["status"],
+        "ok"
+    );
     assert_eq!(
-        client.post(&format!("{}/api/command", base))
+        client
+            .post(&format!("{}/api/command", base))
             .json(&serde_json::json!({"command": "nonexistent"}))
-            .send().unwrap().json::<serde_json::Value>().unwrap()["status"], "error");
+            .send()
+            .unwrap()
+            .json::<serde_json::Value>()
+            .unwrap()["status"],
+        "error"
+    );
 
     // Gateway UI
-    let html = client.get(&format!("{}", base)).send().unwrap().text().unwrap();
+    let html = client
+        .get(&format!("{}", base))
+        .send()
+        .unwrap()
+        .text()
+        .unwrap();
     assert!(html.contains("PNW Gateway"));
 
     // Cleanup
@@ -107,10 +143,35 @@ fn test_e2e_full_workflow() {
     assert!(out.contains("Created novel"), "create novel: {}", out);
     let out = run(&pnw, &["novel", "show"]);
     assert!(out.contains("e2e-novel"), "show novel: {}", out);
-    let out = run(&pnw, &["setting", "update", "--title", "E2E测试", "--description", "测试"]);
+    let out = run(
+        &pnw,
+        &[
+            "setting",
+            "update",
+            "--title",
+            "E2E测试",
+            "--description",
+            "测试",
+        ],
+    );
     assert!(!out.contains("Error"), "setting update: {}", out);
-    let out = run(&pnw, &["character", "add", "张三", "--char-type", "0", "--age", "25"]);
-    assert!(out.contains("Character") || out.contains("张三"), "add char: {}", out);
+    let out = run(
+        &pnw,
+        &[
+            "character",
+            "add",
+            "张三",
+            "--char-type",
+            "0",
+            "--age",
+            "25",
+        ],
+    );
+    assert!(
+        out.contains("Character") || out.contains("张三"),
+        "add char: {}",
+        out
+    );
     let out = run(&pnw, &["character", "list"]);
     assert!(out.contains("张三"), "char list: {}", out);
     let out = run(&pnw, &["outline", "phase", "add", "第一卷"]);
@@ -118,16 +179,49 @@ fn test_e2e_full_workflow() {
     let out = run(&pnw, &["outline", "phase", "list"]);
     let pid = extract_json_id(&out);
     assert!(!pid.is_empty(), "no phase id in: {}", out);
-    let out = run(&pnw, &["outline", "chapter", "add", &pid, "第一章", "--content", "剧情开始", "--hook", "悬念"]);
+    let out = run(
+        &pnw,
+        &[
+            "outline",
+            "chapter",
+            "add",
+            &pid,
+            "第一章",
+            "--content",
+            "剧情开始",
+            "--hook",
+            "悬念",
+        ],
+    );
     assert!(out.contains("OutlineChapter"), "add ch1: {}", out);
-    let out = run(&pnw, &["outline", "chapter", "add", &pid, "第二章", "--content", "展开", "--hook", "高潮"]);
+    let out = run(
+        &pnw,
+        &[
+            "outline",
+            "chapter",
+            "add",
+            &pid,
+            "第二章",
+            "--content",
+            "展开",
+            "--hook",
+            "高潮",
+        ],
+    );
     assert!(out.contains("OutlineChapter"), "add ch2: {}", out);
     let out = run(&pnw, &["outline", "chapter", "list", &pid]);
-    assert!(out.contains("OutlineChapterList"), "list outline ch: {}", out);
+    assert!(
+        out.contains("OutlineChapterList"),
+        "list outline ch: {}",
+        out
+    );
     let out = run(&pnw, &["status"]);
     assert!(out.contains("e2e-novel"), "status: {}", out);
     let out_path = tmp.join("export.txt");
-    let out = run(&pnw, &["export", "txt", "--output", out_path.to_str().unwrap()]);
+    let out = run(
+        &pnw,
+        &["export", "txt", "--output", out_path.to_str().unwrap()],
+    );
     assert!(out.contains("导出完成"), "export: {}", out);
     let out = run(&pnw, &["sample", "add", "风格参考", "这是样例文字。"]);
     assert!(out.contains("Created sample"), "add sample: {}", out);
@@ -146,10 +240,17 @@ fn binary_path() -> String {
 }
 
 fn run(binary: &str, args: &[&str]) -> String {
-    let output = Command::new(binary).args(args).output()
+    let output = Command::new(binary)
+        .args(args)
+        .output()
         .unwrap_or_else(|e| panic!("exec {} {:?}: {}", binary, args, e));
     if !output.status.success() {
-        panic!("FAILED: {} {:?}\nstderr: {}", binary, args, String::from_utf8_lossy(&output.stderr));
+        panic!(
+            "FAILED: {} {:?}\nstderr: {}",
+            binary,
+            args,
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
     String::from_utf8_lossy(&output.stdout).to_string()
 }
@@ -159,9 +260,13 @@ fn extract_json_id(json: &str) -> String {
         let line = line.trim();
         if line.starts_with("\"id\"") {
             if let Some(start) = line.find(':') {
-                let after = line[start+1..].trim();
+                let after = line[start + 1..].trim();
                 if after.starts_with('"') {
-                    let id: String = after.trim_start_matches('"').chars().take_while(|c| c != &'"').collect();
+                    let id: String = after
+                        .trim_start_matches('"')
+                        .chars()
+                        .take_while(|c| c != &'"')
+                        .collect();
                     if id.len() == 36 && id.chars().filter(|&c| c == '-').count() == 4 {
                         return id;
                     }
