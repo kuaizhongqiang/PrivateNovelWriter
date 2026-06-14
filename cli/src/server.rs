@@ -116,6 +116,7 @@ pub async fn run_server(host: &str, port: u16, project: Option<&str>) {
         .route("/api/agent/write", post(api_agent_write))
         .route("/api/agent/revise", post(api_agent_revise))
         .route("/api/agent/evaluate/{id}", post(api_agent_evaluate))
+        .route("/api/export/txt", post(api_export_txt))
         .route("/api/command", post(api_command))
         .layer(CorsLayer::permissive())
         .with_state(state);
@@ -472,6 +473,47 @@ async fn api_agent_evaluate(
         Ok(s) => Json(serde_json::json!({"status":"ok","summary":s})),
         Err(e) => Json(serde_json::json!({"status":"error","error":e.to_string()})),
     }
+}
+
+// ─── Export ───
+
+async fn api_export_txt(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
+    let handler = match open_fresh_handler(&state) {
+        Ok(h) => h,
+        Err(e) => return Json(serde_json::json!({"status":"error","error":e})),
+    };
+    let novel_id = match active_novel_id(&handler.conn) {
+        Ok(id) => id,
+        Err(e) => return Json(serde_json::json!({"status":"error","error":e})),
+    };
+    let novel = match crud::get_novel(&handler.conn, &novel_id) {
+        Ok(Some(n)) => n,
+        _ => return Json(serde_json::json!({"status":"error","error":"Novel not found"})),
+    };
+    let phases = crud::list_text_phases(&handler.conn, &novel_id).unwrap_or_default();
+    let mut all_chapters = Vec::new();
+    for phase in &phases {
+        if let Ok(chs) = crud::list_text_chapters(&handler.conn, &phase.id) {
+            for ch in chs {
+                if let Ok(content) = storage::read_text(&state.project_path.join(&ch.file_path)) {
+                    all_chapters.push((phase.name.clone(), ch.name.clone(), ch.sort, content));
+                }
+            }
+        }
+    }
+    all_chapters.sort_by(|a, b| a.2.cmp(&b.2));
+    let merged: String = all_chapters.iter().fold(String::new(), |mut acc, (pn, cn, _, c)| {
+        acc.push_str(&format!("【{}】{}\n\n{}\n\n", pn, cn, c));
+        acc
+    });
+    let wc = merged.chars().filter(|c| !c.is_whitespace()).count() as u64;
+    Json(serde_json::json!({
+        "status":"ok",
+        "novel_name": novel.name,
+        "chapter_count": all_chapters.len(),
+        "word_count": wc,
+        "content": merged,
+    }))
 }
 
 // ─── Generic command ───

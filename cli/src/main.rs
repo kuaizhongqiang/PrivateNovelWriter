@@ -152,6 +152,11 @@ enum Commands {
         #[arg(long)]
         project: Option<String>,
     },
+    /// 导出
+    Export {
+        #[command(subcommand)]
+        action: ExportCommands,
+    },
 }
 
 // ─── Agent-level Chapter Commands ───
@@ -407,6 +412,18 @@ enum SampleCommands {
     Delete { id: String },
 }
 
+// ─── Export ───
+
+#[derive(Subcommand)]
+enum ExportCommands {
+    /// 合并正文章节为一个 .txt 文件
+    Txt {
+        /// 输出文件路径（默认 {小说名}.txt）
+        #[arg(long)]
+        output: Option<String>,
+    },
+}
+
 // ─── Main ───
 
 #[tokio::main]
@@ -437,6 +454,7 @@ async fn main() {
                 Commands::Outline { action } => handle_outline(&mut handler, action),
                 Commands::Text { action } => handle_text(&mut handler, action),
                 Commands::Sample { action } => handle_sample(&mut handler, action),
+                Commands::Export { action } => handle_export(&mut handler, action),
                 Commands::Status => handle_status(&mut handler),
             };
 
@@ -920,6 +938,74 @@ fn handle_sample(
         SampleCommands::List => handler.execute(DataCommand::ListSamples { novel_id }),
         SampleCommands::Delete { id } => {
             handler.execute(DataCommand::DeleteSample { id: id.clone() })
+        }
+    }
+}
+
+// ─── Export handlers ───
+
+fn handle_export(
+    handler: &mut Handler,
+    cmd: &ExportCommands,
+) -> Result<Output, pnw_kernel::handler::HandlerError> {
+    match cmd {
+        ExportCommands::Txt { output } => {
+            let novel_id = get_active_novel_id(&handler.conn);
+            let novel = crud::get_novel(&handler.conn, &novel_id)?
+                .ok_or_else(|| pnw_kernel::handler::HandlerError::NotFound("Novel".into()))?;
+
+            let phases = crud::list_text_phases(&handler.conn, &novel_id)?;
+            let mut all_chapters = Vec::new();
+            for phase in &phases {
+                let chapters = crud::list_text_chapters(&handler.conn, &phase.id)?;
+                for ch in chapters {
+                    let full_path = handler.project_path.join(&ch.file_path);
+                    if let Ok(content) = storage::read_text(&full_path) {
+                        all_chapters.push((phase.name.clone(), ch.name.clone(), ch.sort, content));
+                    }
+                }
+            }
+
+            all_chapters.sort_by(|a, b| a.2.cmp(&b.2));
+
+            let mut merged = String::new();
+            for (phase_name, ch_name, _sort, content) in &all_chapters {
+                merged.push_str(&format!("【{}】{}\n\n", phase_name, ch_name));
+                merged.push_str(content);
+                merged.push_str("\n\n");
+            }
+
+            let first_sort = all_chapters.first().map(|c| c.2).unwrap_or(0);
+            let last_sort = all_chapters.last().map(|c| c.2).unwrap_or(0);
+            let default_name = format!("{}_{}——{}", novel.name, first_sort, last_sort);
+            let out_path = output
+                .as_ref()
+                .map(|p| std::path::PathBuf::from(p))
+                .unwrap_or_else(|| {
+                    let mut p = std::env::current_dir().unwrap_or_default();
+                    p.push(format!("{}.txt", default_name));
+                    p
+                });
+
+            // Use merge_write for atomic export
+            let tmp_path = out_path.with_extension("tmp");
+            std::fs::write(&tmp_path, &merged).map_err(|e| {
+                pnw_kernel::handler::HandlerError::Storage(
+                    pnw_kernel::storage::StorageError::Io(e),
+                )
+            })?;
+            std::fs::rename(&tmp_path, &out_path).map_err(|e| {
+                pnw_kernel::handler::HandlerError::Storage(
+                    pnw_kernel::storage::StorageError::Io(e),
+                )
+            })?;
+
+            Ok(Output::Status(format!(
+                "导出完成: {} ({} 章, {} 字)",
+                out_path.display(),
+                all_chapters.len(),
+                merged.chars().filter(|c| !c.is_whitespace()).count(),
+            )))
         }
     }
 }
