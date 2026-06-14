@@ -219,7 +219,7 @@ async fn api_tools() -> Json<serde_json::Value> {
             {"path":"/api/setting","method":"POST","description":"更新世界观设定"},
             {"path":"/api/samples","method":"GET","description":"文风样例列表"},
             {"path":"/api/stats","method":"GET","description":"项目统计"},
-            {"path":"/api/export/txt","method":"GET","description":"导出合并全文"},
+            {"path":"/api/export/txt","method":"POST","description":"导出合并全文"},
             {"path":"/api/agent/write","method":"POST","description":"写正文（Agent B）"},
             {"path":"/api/agent/revise","method":"POST","description":"修改正文（Agent B）"},
             {"path":"/api/agent/evaluate/{id}","method":"POST","description":"评估章节（Agent B）"},
@@ -229,7 +229,12 @@ async fn api_tools() -> Json<serde_json::Value> {
         "commands": [
             "get_outline","get_novel","list_characters","get_setting",
             "list_samples","get_plugin","list_outline_phases","list_outline_chapters",
-            "create_outline_phase","create_outline_chapter","create_character","write_setting"
+            "list_text_phases","list_text_chapters",
+            "create_outline_phase","create_outline_chapter","create_character",
+            "create_text_phase","create_text_chapter",
+            "delete_character","delete_outline_phase","delete_outline_chapter",
+            "write_setting",
+            "get_unwritten_chapters","get_phase_progress"
         ]
     }))
 }
@@ -525,8 +530,8 @@ async fn api_agent_write(
         let conn = rusqlite::Connection::open(pp.join("project.db")).unwrap();
         rt.block_on(pnw_kernel::agent::execute_agent_command(&conn, &pp, cmd))
     }).await.unwrap() {
-        Ok(s) => Json(serde_json::json!({"status":"ok","summary":s})),
-        Err(e) => Json(serde_json::json!({"status":"error","error":e.to_string()})),
+        Ok(s) => Json(serde_json::json!({"status":"ok","data":{"summary":s}})),
+        Err(e) => Json(serde_json::json!({"status":"error","error":e.to_string(),"error_code":"LLM_ERROR"})),
     }
 }
 
@@ -544,8 +549,8 @@ async fn api_agent_revise(
         let conn = rusqlite::Connection::open(pp.join("project.db")).unwrap();
         rt.block_on(pnw_kernel::agent::execute_agent_command(&conn, &pp, cmd))
     }).await.unwrap() {
-        Ok(s) => Json(serde_json::json!({"status":"ok","summary":s})),
-        Err(e) => Json(serde_json::json!({"status":"error","error":e.to_string()})),
+        Ok(s) => Json(serde_json::json!({"status":"ok","data":{"summary":s}})),
+        Err(e) => Json(serde_json::json!({"status":"error","error":e.to_string(),"error_code":"LLM_ERROR"})),
     }
 }
 
@@ -560,8 +565,8 @@ async fn api_agent_evaluate(
         let conn = rusqlite::Connection::open(pp.join("project.db")).unwrap();
         rt.block_on(pnw_kernel::agent::execute_agent_command(&conn, &pp, cmd))
     }).await.unwrap() {
-        Ok(s) => Json(serde_json::json!({"status":"ok","summary":s})),
-        Err(e) => Json(serde_json::json!({"status":"error","error":e.to_string()})),
+        Ok(s) => Json(serde_json::json!({"status":"ok","data":{"summary":s}})),
+        Err(e) => Json(serde_json::json!({"status":"error","error":e.to_string(),"error_code":"LLM_ERROR"})),
     }
 }
 
@@ -640,6 +645,11 @@ async fn api_command(
         "list_samples" => DataCommand::ListSamples { novel_id },
         "get_plugin" => DataCommand::GetPlugin { novel_id },
         "list_outline_phases" => DataCommand::ListOutlinePhases { novel_id },
+        "list_text_phases" => DataCommand::ListTextPhases { novel_id },
+        "list_text_chapters" => {
+            let pid = body.args.get("phase_id").and_then(|v| v.as_str()).unwrap_or("");
+            DataCommand::ListTextChapters { phase_id: pid.to_string() }
+        }
         "list_outline_chapters" => {
             let pid = body.args.get("phase_id").and_then(|v| v.as_str()).unwrap_or("");
             DataCommand::ListOutlineChapters { phase_id: pid.to_string() }
@@ -657,9 +667,13 @@ async fn api_command(
         "create_outline_chapter" => {
             let name = body.args.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
             let pid = body.args.get("phase_id").and_then(|v| v.as_str()).unwrap_or("");
+            let content = body.args.get("content").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let hook = body.args.get("hook").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let chs = crud::list_outline_chapters(&handler.conn, pid).unwrap_or_default();
+            let sort = chs.iter().map(|c| c.sort).max().unwrap_or(-1) + 1;
             DataCommand::CreateOutlineChapter {
                 id: uuid::Uuid::new_v4().to_string(), phase_id: pid.to_string(),
-                sort: 0, chapter_name: name, content: String::new(), hook: String::new(),
+                sort, chapter_name: name, content, hook,
             }
         }
         "create_character" => {
@@ -671,6 +685,45 @@ async fn api_command(
                 relationship: body.args.get("relationship").and_then(|v| v.as_str()).unwrap_or("").to_string(),
             }
         }
+        "create_text_phase" => {
+            let name = body.args.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let phases = crud::list_text_phases(&handler.conn, &novel_id).unwrap_or_default();
+            let sort = phases.iter().map(|p| p.sort).max().unwrap_or(-1) + 1;
+            DataCommand::CreateTextPhase {
+                id: uuid::Uuid::new_v4().to_string(), novel_id: novel_id.clone(), sort, name,
+            }
+        }
+        "delete_character" => {
+            let id = body.args.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            DataCommand::DeleteCharacter { id }
+        }
+        "delete_outline_phase" => {
+            let phase_id = body.args.get("phase_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            DataCommand::DeleteOutlinePhase { phase_id }
+        }
+        "delete_outline_chapter" => {
+            let id = body.args.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            DataCommand::DeleteOutlineChapter { id }
+        }
+        "create_text_chapter" => {
+            let phase_id = body.args.get("phase_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let name = body.args.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let from_outline = body.args.get("from_outline").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            // Auto-compute file path
+            let phase_name: String = handler.conn.query_row(
+                "SELECT name FROM text_phase WHERE id = ?1",
+                rusqlite::params![phase_id],
+                |row| row.get(0),
+            ).unwrap_or_else(|_| "unknown".to_string());
+            let chs = crud::list_text_chapters(&handler.conn, &phase_id).unwrap_or_default();
+            let sort = chs.iter().map(|c| c.sort).max().unwrap_or(-1) + 1;
+            let file_path = format!("text/{}/ch-{:03}.txt", phase_name, sort);
+            let full_path = handler.project_path.join(&file_path);
+            if let Some(parent) = full_path.parent() {
+                std::fs::create_dir_all(parent).ok();
+            }
+            DataCommand::CreateTextChapter { id: uuid::Uuid::new_v4().to_string(), phase_id, sort, name, file_path }
+        }
         "write_setting" => {
             DataCommand::WriteSetting {
                 novel_id,
@@ -680,6 +733,38 @@ async fn api_command(
                 novel_type: body.args.get("novel_type").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
                 tags: body.args.get("tags").and_then(|v| v.as_array()).map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect()).unwrap_or_default(),
             }
+        }
+        // Cross-entity queries
+        "get_unwritten_chapters" => {
+            let ops = crud::list_outline_phases(&handler.conn, &novel_id).unwrap_or_default();
+            let mut unwritten = Vec::new();
+            for op in &ops {
+                if let Ok(chs) = crud::list_outline_chapters(&handler.conn, &op.id) {
+                    for ch in chs {
+                        if ch.text_chapter_id.is_none() {
+                            unwritten.push(serde_json::json!({
+                                "phase_id": op.id, "phase_name": op.name,
+                                "chapter_id": ch.id, "chapter_name": ch.chapter_name,
+                                "content": ch.content, "hook": ch.hook,
+                            }));
+                        }
+                    }
+                }
+            }
+            return api_ok(serde_json::json!(unwritten));
+        }
+        "get_phase_progress" => {
+            let ops = crud::list_outline_phases(&handler.conn, &novel_id).unwrap_or_default();
+            let mut result = Vec::new();
+            for op in &ops {
+                let total = crud::list_outline_chapters(&handler.conn, &op.id).unwrap_or_default().len();
+                let written = total - crud::list_outline_chapters(&handler.conn, &op.id).unwrap_or_default().iter().filter(|c| c.text_chapter_id.is_none()).count();
+                result.push(serde_json::json!({
+                    "phase_id": op.id, "phase_name": op.name,
+                    "total_chapters": total, "written_chapters": written,
+                }));
+            }
+            return api_ok(serde_json::json!(result));
         }
         _ => return api_err(format!("Unknown command: {}", body.command)),
     };
@@ -930,7 +1015,7 @@ async function doWrite() {
   showWriteStatus('⏳ Agent B 正在写作中…');
   const res = await api('/agent/write', { method: 'POST', body: JSON.stringify({ chapter_id: cid, brief }) });
   if (res.status === 'ok') {
-    showWriteStatus('✅ ' + (res.summary || '写作完成'));
+    showWriteStatus('✅ ' + ((res.data?.summary) || '写作完成'));
     await loadStats(); await loadReader();
   } else {
     showWriteStatus('❌ ' + (res.error || '写作失败'), true);
@@ -943,7 +1028,7 @@ async function doEvaluate() {
   showWriteStatus('⏳ 评估中…');
   const res = await api('/agent/evaluate/' + cid, { method: 'POST' });
   if (res.status === 'ok') {
-    showWriteStatus('📊 评估结果:\n' + (res.summary || '完成'));
+    showWriteStatus('📊 评估结果:\n' + ((res.data?.summary) || '完成'));
   } else {
     showWriteStatus('❌ ' + (res.error || '评估失败'), true);
   }
@@ -957,7 +1042,7 @@ async function doRevise() {
   showWriteStatus('⏳ Agent B 正在修改…');
   const res = await api('/agent/revise', { method: 'POST', body: JSON.stringify({ chapter_id: cid, feedback }) });
   if (res.status === 'ok') {
-    showWriteStatus('✅ 修改完成: ' + (res.summary || ''));
+    showWriteStatus('✅ 修改完成: ' + ((res.data?.summary) || ''));
     await loadStats();
   } else {
     showWriteStatus('❌ ' + (res.error || '修改失败'), true);

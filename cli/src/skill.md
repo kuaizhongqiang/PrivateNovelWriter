@@ -91,6 +91,9 @@
 
 | 方法 | 路径 | 说明 |
 | :--- | :--- | :--- |
+| GET | `/api/health` | 探活（轻量，无 DB） |
+| GET | `/api/status` | Server 信息（版本、session） |
+| GET | `/api/tools` | 工具发现（端点列表 + 命令名） |
 | GET | `/api/project` | 项目基本信息 |
 | GET | `/api/stats` | 完整统计（字数、章节数、完成度） |
 | GET | `/api/outline` | 大纲树结构 |
@@ -122,10 +125,19 @@
 | `get_plugin` | — | 金手指设定 |
 | `list_outline_phases` | — | 大纲卷列表 |
 | `list_outline_chapters` | `{ phase_id }` | 卷下的大纲章列表 |
+| `list_text_phases` | — | 正文卷列表 |
+| `list_text_chapters` | `{ phase_id }` | 正文章节列表 |
 | `create_outline_phase` | `{ name }` | 创建大纲卷 |
-| `create_outline_chapter` | `{ phase_id, name }` | 创建大纲章 |
+| `create_outline_chapter` | `{ phase_id, name, content?, hook? }` | 创建大纲章（自动计算 sort） |
+| `create_text_phase` | `{ name }` | 创建正文卷 |
+| `create_text_chapter` | `{ phase_id, name, from_outline }` | 创建正文章节（自动建 .txt 路径） |
 | `create_character` | `{ name, char_type?, age?, relationship? }` | 创建角色 |
 | `write_setting` | `{ title?, inspiration?, description?, novel_type?, tags? }` | 更新设定 |
+| `delete_character` | `{ id }` | 删除角色 |
+| `delete_outline_phase` | `{ phase_id }` | 删除大纲卷 |
+| `delete_outline_chapter` | `{ id }` | 删除大纲章 |
+| `get_unwritten_chapters` | — | 列出所有已规划但未写正文的大纲章 |
+| `get_phase_progress` | — | 每卷的规划/完成章节数 |
 
 ### 写作
 

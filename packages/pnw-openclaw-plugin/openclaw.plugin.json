@@ -1,0 +1,27 @@
+{
+  "id": "pnw-writer",
+  "name": "PrivateNovelWriter",
+  "description": "Novel writing assistant — outline, generate, evaluate",
+  "version": "0.1.0",
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "serverUrl": {
+        "type": "string",
+        "description": "PNW Server URL, e.g. http://127.0.0.1:3000"
+      }
+    },
+    "required": ["serverUrl"]
+  },
+  "contracts": {
+    "tools": [
+      "get_project", "get_stats", "get_outline",
+      "create_outline_phase", "create_outline_chapter",
+      "list_characters", "create_character",
+      "get_setting", "update_setting",
+      "list_chapters", "read_chapter",
+      "write_chapter", "revise_chapter", "evaluate_chapter",
+      "export_txt", "list_samples"
+    ]
+  }
+}
