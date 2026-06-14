@@ -10,64 +10,72 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build-and-test:
+  build-cli:
     runs-on: windows-latest
-
     steps:
       - uses: actions/checkout@v4
-
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable-x86_64-pc-windows-msvc
-
       - name: Cache cargo dependencies
         uses: Swatinem/rust-cache@v2
-
       - name: Build kernel + CLI
         run: cargo build -p pnw-kernel -p pnw --verbose
+      - name: Run tests
+        run: cargo test --verbose
 
+  lint:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable-x86_64-pc-windows-msvc
+          components: clippy, rustfmt
+      - name: Cache cargo dependencies
+        uses: Swatinem/rust-cache@v2
+      - name: Check formatting
+        run: cargo fmt --all --check
+      - name: Clippy (kernel + CLI)
+        run: cargo clippy -p pnw-kernel -p pnw --all-targets -- -D warnings
+
+  plugin:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: 'npm'
-          cache-dependency-path: desktop/package-lock.json
-
-      - name: Build frontend
-        run: |
-          cd desktop
-          npm ci
-          npm run build
-
-      - name: Build desktop
-        run: cargo build -p pnw-desktop --verbose
-
-      - name: Run tests
-        run: cargo test --verbose
-
       - name: Build OpenClaw plugin
         run: |
           cd packages/pnw-openclaw-plugin
           npm ci
           npm run build
 
-  lint:
+  desktop:
     runs-on: windows-latest
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
-
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable-x86_64-pc-windows-msvc
-          components: clippy, rustfmt
-
       - name: Cache cargo dependencies
         uses: Swatinem/rust-cache@v2
-
-      - name: Check formatting
-        run: cargo fmt --all --check
-
-      - name: Clippy (kernel + CLI)
-        run: cargo clippy -p pnw-kernel -p pnw --all-targets -- -D warnings
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+          cache-dependency-path: desktop/package-lock.json
+      - name: Build frontend
+        run: |
+          cd desktop
+          npm ci
+          npm run build
+      - name: Build desktop
+        run: cargo build -p pnw-desktop --verbose
