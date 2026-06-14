@@ -1,3 +1,4 @@
+use std::io::Read;
 use std::process::Command;
 
 fn server_binary_path() -> String {
@@ -45,13 +46,17 @@ fn test_server_integration() {
             tmp.join("server-test").to_str().unwrap(),
         ])
         .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
         .spawn()
         .expect("Failed to start server");
 
     std::thread::sleep(std::time::Duration::from_millis(500));
     if let Ok(Some(status)) = server.try_wait() {
-        panic!("Server exited early with code {}", status);
+        let mut err_buf = String::new();
+        if let Some(mut stderr) = server.stderr.take() {
+            stderr.read_to_string(&mut err_buf).ok();
+        }
+        panic!("Server exited early with code {}:\n{}", status, err_buf);
     }
     wait_for_server(port);
     let base = format!("http://127.0.0.1:{}", port);
