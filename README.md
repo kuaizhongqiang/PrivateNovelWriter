@@ -3,6 +3,10 @@
 > 私人小说写作助手 — 专为中长篇小说批量生产设计。
 > 当前版本: **0.2.0-beta** | 架构: **Server Mode + REST API + OpenClaw 插件**
 
+[![CI](https://github.com/kuaizhongqiang/PrivateNovelWriter/actions/workflows/ci.yml/badge.svg)](https://github.com/kuaizhongqiang/PrivateNovelWriter/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/pnw-openclaw-plugin)](https://www.npmjs.com/package/pnw-openclaw-plugin)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
+
 ---
 
 ## 概述
