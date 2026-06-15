@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::sync::Mutex as AsyncMutex;
 
 use axum::{
     extract::{Path as AxumPath, Query, State},
@@ -22,13 +22,16 @@ use tower_http::cors::{Any, CorsLayer};
 // ─── Shared state ───
 
 struct AppState {
-    project_path: PathBuf,
+    /// Project path — wrapped in Mutex so it can be switched at runtime (#117)
+    project_path: std::sync::Mutex<PathBuf>,
     /// Server start timestamp (Unix seconds), used as session identifier
     session_start: u64,
     /// Request counter for session tracking
     request_count: AtomicU64,
     /// Idempotency store: client_request_id → JSON result
-    idempotent_results: Mutex<HashMap<String, serde_json::Value>>,
+    idempotent_results: std::sync::Mutex<HashMap<String, serde_json::Value>>,
+    /// Serializer for sort-sensitive create operations (#118 race condition fix)
+    sort_serializer: AsyncMutex<()>,
 }
 
 // ─── JSON envelope ───
@@ -90,10 +93,11 @@ fn api_ok(val: serde_json::Value) -> Json<ApiResponse<serde_json::Value>> {
 // ─── Helpers ───
 
 fn open_fresh_handler(state: &AppState) -> Result<Handler, String> {
+    let project_path = state.project_path.lock().unwrap().clone();
     Ok(Handler::new(
-        rusqlite::Connection::open(state.project_path.join("project.db"))
+        rusqlite::Connection::open(project_path.join("project.db"))
             .map_err(|e| format!("DB error: {}", e))?,
-        state.project_path.clone(),
+        project_path,
     ))
 }
 
@@ -140,10 +144,11 @@ pub async fn run_server(host: &str, port: u16, project: Option<&str>, cors_origi
         .unwrap_or(0);
 
     let state = Arc::new(AppState {
-        project_path,
+        project_path: std::sync::Mutex::new(project_path),
         session_start,
         request_count: AtomicU64::new(0),
-        idempotent_results: Mutex::new(HashMap::new()),
+        idempotent_results: std::sync::Mutex::new(HashMap::new()),
+        sort_serializer: AsyncMutex::new(()),
     });
 
     let app = Router::new()
@@ -154,6 +159,7 @@ pub async fn run_server(host: &str, port: u16, project: Option<&str>, cors_origi
         .route("/api/health", get(api_health))
         .route("/api/tools", get(api_tools))
         .route("/api/project", get(api_project))
+        .route("/api/project/switch", post(api_project_switch))
         .route("/api/outline", get(api_outline))
         .route("/api/chapters", get(api_chapters))
         .route(
@@ -240,6 +246,7 @@ async fn api_tools() -> Json<serde_json::Value> {
             {"path":"/api/health","method":"GET","description":"健康检查"},
             {"path":"/api/status","method":"GET","description":"Server 信息（版本+session）"},
             {"path":"/api/project","method":"GET","description":"项目基本信息"},
+            {"path":"/api/project/switch","method":"POST","description":"运行时切换项目（#117）"},
             {"path":"/api/outline","method":"GET","description":"大纲树"},
             {"path":"/api/chapters","method":"GET","description":"所有正文章节列表"},
             {"path":"/api/chapter/{id}","method":"GET","description":"读取章节正文"},
@@ -301,6 +308,30 @@ async fn api_project(State(state): State<Arc<AppState>>) -> Json<ApiResponse<ser
     }
 }
 
+#[derive(Deserialize)]
+struct SwitchProjectBody {
+    path: String,
+}
+
+/// Switch the server's active project at runtime (#117).
+async fn api_project_switch(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<SwitchProjectBody>,
+) -> Json<ApiResponse<&'static str>> {
+    let new_path = PathBuf::from(&body.path);
+    if !new_path.join("project.db").exists() {
+        return Json(ApiResponse::err_inner("No project.db found at given path"));
+    }
+    // Verify DB can be opened before switching
+    if let Err(e) = rusqlite::Connection::open(new_path.join("project.db")) {
+        return Json(ApiResponse::err_inner(format!("Cannot open database: {}", e)));
+    }
+    // Clean up orphan .tmp files from the new project
+    storage::cleanup_orphan_tmp(&new_path).ok();
+    *state.project_path.lock().unwrap() = new_path;
+    Json(ApiResponse::ok("switched"))
+}
+
 async fn api_outline(State(state): State<Arc<AppState>>) -> Json<ApiResponse<serde_json::Value>> {
     let handler = match open_fresh_handler(&state) {
         Ok(h) => h,
@@ -359,11 +390,20 @@ async fn api_chapter_get(
         Ok(None) => return api_err("Chapter not found"),
         Err(e) => return api_err(e.to_string()),
     };
-    let full_path = state.project_path.join(&tc.file_path);
+    let phase_name: String = handler
+        .conn
+        .query_row(
+            "SELECT name FROM text_phase WHERE id = ?1",
+            rusqlite::params![tc.phase_id],
+            |row| row.get(0),
+        )
+        .unwrap_or_default();
+    let project_path = state.project_path.lock().unwrap().clone();
+    let full_path = project_path.join(&tc.file_path);
     let content = storage::read_text(&full_path).unwrap_or_default();
     api_ok(serde_json::json!({
         "id": tc.id, "name": tc.name, "sort": tc.sort, "word_count": tc.word_count,
-        "phase_id": tc.phase_id, "content": content, "file_path": tc.file_path,
+        "phase_id": tc.phase_id, "phase_name": phase_name, "content": content, "file_path": tc.file_path,
     }))
 }
 
@@ -386,7 +426,8 @@ async fn api_chapter_save(
         Ok(None) => return Json(ApiResponse::err_inner("Chapter not found")),
         Err(e) => return Json(ApiResponse::err_inner(e.to_string())),
     };
-    let full_path = state.project_path.join(&tc.file_path);
+    let project_path = state.project_path.lock().unwrap().clone();
+    let full_path = project_path.join(&tc.file_path);
     if let Err(e) = storage::write_text(&full_path, &body.content) {
         return Json(ApiResponse::err_inner(format!("Write error: {}", e)));
     }
@@ -619,9 +660,9 @@ async fn api_agent_write(
     State(state): State<Arc<AppState>>,
     Json(body): Json<AgentWriteBody>,
 ) -> Json<serde_json::Value> {
-    let pp = state.project_path.clone();
+    let pp = state.project_path.lock().unwrap().clone();
     let novel_id = {
-        let conn = rusqlite::Connection::open(state.project_path.join("project.db")).unwrap();
+        let conn = rusqlite::Connection::open(pp.join("project.db")).unwrap();
         active_novel_id(&conn).unwrap_or_default()
     };
     let cmd = AgentCommand::WriteChapter {
@@ -654,7 +695,7 @@ async fn api_agent_revise(
     State(state): State<Arc<AppState>>,
     Json(body): Json<AgentReviseBody>,
 ) -> Json<serde_json::Value> {
-    let pp = state.project_path.clone();
+    let pp = state.project_path.lock().unwrap().clone();
     let cmd = AgentCommand::ReviseChapter {
         chapter_id: body.chapter_id,
         feedback: body.feedback,
@@ -678,7 +719,7 @@ async fn api_agent_evaluate(
     State(state): State<Arc<AppState>>,
     AxumPath(id): AxumPath<String>,
 ) -> Json<serde_json::Value> {
-    let pp = state.project_path.clone();
+    let pp = state.project_path.lock().unwrap().clone();
     let cmd = AgentCommand::Evaluate { chapter_id: id };
     match tokio::task::spawn_blocking(move || {
         let rt = tokio::runtime::Runtime::new().unwrap();
@@ -719,11 +760,12 @@ async fn api_export_txt(
         _ => return Json(serde_json::json!({"status":"error","error":"Novel not found"})),
     };
     let phases = crud::list_text_phases(&handler.conn, &novel_id).unwrap_or_default();
+    let project_path = state.project_path.lock().unwrap().clone();
     let mut all_chapters = Vec::new();
     for phase in &phases {
         if let Ok(chs) = crud::list_text_chapters(&handler.conn, &phase.id) {
             for ch in chs {
-                if let Ok(content) = storage::read_text(&state.project_path.join(&ch.file_path)) {
+                if let Ok(content) = storage::read_text(&project_path.join(&ch.file_path)) {
                     all_chapters.push((phase.name.clone(), ch.name.clone(), ch.sort, content));
                 }
             }
@@ -763,6 +805,27 @@ struct CmdBody {
     client_request_id: Option<String>,
 }
 
+/// Helper: cache idempotency result and return JSON response.
+/// Used by sort-sensitive command arms that hold sort_serializer lock.
+fn dispatch_result(
+    state: &AppState,
+    body: &CmdBody,
+    result: Result<Output, pnw_kernel::handler::HandlerError>,
+) -> Json<ApiResponse<serde_json::Value>> {
+    match result {
+        Ok(output) => {
+            if let Some(ref rid) = body.client_request_id {
+                if !rid.is_empty() {
+                    let val = serde_json::to_value(&output).unwrap_or_default();
+                    state.idempotent_results.lock().unwrap().insert(rid.clone(), val);
+                }
+            }
+            Json(ApiResponse::from_output(output))
+        }
+        Err(e) => api_err(e.to_string()),
+    }
+}
+
 async fn api_command(
     State(state): State<Arc<AppState>>,
     Json(body): Json<CmdBody>,
@@ -779,7 +842,7 @@ async fn api_command(
     // Idempotency: if client_request_id is provided and we already have a result, return it
     if let Some(ref rid) = body.client_request_id {
         if !rid.is_empty() {
-            let store = state.idempotent_results.lock().await;
+            let store = state.idempotent_results.lock().unwrap();
             if let Some(cached) = store.get(rid) {
                 return Json(ApiResponse {
                     status: "ok".into(),
@@ -825,7 +888,7 @@ async fn api_command(
                 phase_id: pid.to_string(),
             }
         }
-        // Write commands
+        // ── Sort-sensitive write commands (locked to prevent race condition #118) ──
         "create_outline_phase" => {
             let name = body
                 .args
@@ -833,15 +896,18 @@ async fn api_command(
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string();
+            let _guard = state.sort_serializer.lock().await;
             let phases = crud::list_outline_phases(&handler.conn, &novel_id).unwrap_or_default();
             let sort = phases.iter().map(|p| p.sort).max().unwrap_or(-1) + 1;
-            DataCommand::CreateOutlinePhase {
+            let cmd = DataCommand::CreateOutlinePhase {
                 id: uuid::Uuid::new_v4().to_string(),
                 novel_id,
                 sort,
                 name,
                 description: String::new(),
-            }
+            };
+            let result = handler.execute(cmd);
+            return dispatch_result(&*state, &body, result);
         }
         "create_outline_chapter" => {
             let name = body
@@ -867,16 +933,19 @@ async fn api_command(
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string();
+            let _guard = state.sort_serializer.lock().await;
             let chs = crud::list_outline_chapters(&handler.conn, pid).unwrap_or_default();
             let sort = chs.iter().map(|c| c.sort).max().unwrap_or(-1) + 1;
-            DataCommand::CreateOutlineChapter {
+            let cmd = DataCommand::CreateOutlineChapter {
                 id: uuid::Uuid::new_v4().to_string(),
                 phase_id: pid.to_string(),
                 sort,
                 chapter_name: name,
                 content,
                 hook,
-            }
+            };
+            let result = handler.execute(cmd);
+            return dispatch_result(&*state, &body, result);
         }
         "create_character" => DataCommand::CreateCharacter {
             id: uuid::Uuid::new_v4().to_string(),
@@ -907,14 +976,17 @@ async fn api_command(
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string();
+            let _guard = state.sort_serializer.lock().await;
             let phases = crud::list_text_phases(&handler.conn, &novel_id).unwrap_or_default();
             let sort = phases.iter().map(|p| p.sort).max().unwrap_or(-1) + 1;
-            DataCommand::CreateTextPhase {
+            let cmd = DataCommand::CreateTextPhase {
                 id: uuid::Uuid::new_v4().to_string(),
                 novel_id: novel_id.clone(),
                 sort,
                 name,
-            }
+            };
+            let result = handler.execute(cmd);
+            return dispatch_result(&*state, &body, result);
         }
         "delete_character" => {
             let id = body
@@ -970,6 +1042,7 @@ async fn api_command(
                     |row| row.get(0),
                 )
                 .unwrap_or_else(|_| "unknown".to_string());
+            let _guard = state.sort_serializer.lock().await;
             let chs = crud::list_text_chapters(&handler.conn, &phase_id).unwrap_or_default();
             let sort = chs.iter().map(|c| c.sort).max().unwrap_or(-1) + 1;
             let file_path = format!("text/{}/ch-{:03}.txt", phase_name, sort);
@@ -985,13 +1058,15 @@ async fn api_command(
                     crud::update_outline_chapter(&handler.conn, &oc).ok();
                 }
             }
-            DataCommand::CreateTextChapter {
+            let cmd = DataCommand::CreateTextChapter {
                 id: tc_id,
                 phase_id,
                 sort,
                 name,
                 file_path,
-            }
+            };
+            let result = handler.execute(cmd);
+            return dispatch_result(&*state, &body, result);
         }
         "write_setting" => DataCommand::WriteSetting {
             novel_id,
@@ -1073,7 +1148,7 @@ async fn api_command(
                     state
                         .idempotent_results
                         .lock()
-                        .await
+                        .unwrap()
                         .insert(rid.clone(), val);
                 }
             }

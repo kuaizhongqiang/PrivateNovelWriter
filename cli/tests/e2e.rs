@@ -74,14 +74,28 @@ fn test_server_integration() {
     }
     wait_for_server(port);
     let base = format!("http://127.0.0.1:{}", port);
-    let client = reqwest::blocking::Client::new();
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .unwrap();
     let get = |path: &str| -> serde_json::Value {
-        client
-            .get(format!("{}{}", base, path))
-            .send()
-            .unwrap()
-            .json()
-            .unwrap()
+        for i in 0..10 {
+            let resp = client.get(format!("{}{}", base, path)).send();
+            match resp {
+                Ok(r) => {
+                    let body = r.json::<serde_json::Value>();
+                    if let Ok(v) = body {
+                        return v;
+                    }
+                    eprintln!("[retry {}] json parse failed for {}", i, path);
+                }
+                Err(e) => {
+                    eprintln!("[retry {}] send failed for {}: {}", i, path, e);
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(300));
+        }
+        panic!("Failed to GET {} after 10 retries", path);
     };
 
     // All GET endpoints
@@ -130,6 +144,108 @@ fn test_server_integration() {
             .unwrap()["status"],
         "error"
     );
+
+    // Create outline phase + chapter (test sort serialization #118)
+    let outline_phase = client
+        .post(format!("{}/api/command", base))
+        .json(&serde_json::json!({"command": "create_outline_phase", "args": {"name": "第一卷"}}))
+        .send()
+        .unwrap()
+        .json::<serde_json::Value>()
+        .unwrap();
+    assert_eq!(outline_phase["status"], "ok");
+    let phase_id = outline_phase["data"]["OutlinePhase"]["id"].as_str().unwrap().to_string();
+    let ch1 = client
+        .post(format!("{}/api/command", base))
+        .json(&serde_json::json!({"command": "create_outline_chapter", "args": {"phase_id": phase_id, "name": "第一章", "content": "开始", "hook": "悬念"}}))
+        .send()
+        .unwrap()
+        .json::<serde_json::Value>()
+        .unwrap();
+    assert_eq!(ch1["status"], "ok");
+    assert_eq!(ch1["data"]["OutlineChapter"]["sort"], 0);
+
+    // Create text phase + chapter via API
+    let text_phase = client
+        .post(format!("{}/api/command", base))
+        .json(&serde_json::json!({"command": "create_text_phase", "args": {"name": "第一卷"}}))
+        .send()
+        .unwrap()
+        .json::<serde_json::Value>()
+        .unwrap();
+    assert_eq!(text_phase["status"], "ok");
+    let text_phase_id = text_phase["data"]["TextPhase"]["id"].as_str().unwrap().to_string();
+    let text_ch = client
+        .post(format!("{}/api/command", base))
+        .json(&serde_json::json!({"command": "create_text_chapter", "args": {"phase_id": text_phase_id, "name": "第一章"}}))
+        .send()
+        .unwrap()
+        .json::<serde_json::Value>()
+        .unwrap();
+    assert_eq!(text_ch["status"], "ok");
+    let tc_id = text_ch["data"]["TextChapter"]["id"].as_str().unwrap().to_string();
+
+    // Test GET /api/chapter/{id} (#116/#119)
+    let r = client
+        .get(format!("{}/api/chapter/{}", base, tc_id))
+        .send()
+        .unwrap();
+    assert!(r.status().is_success(), "GET /api/chapter/{{id}} returned {}", r.status());
+    let body: serde_json::Value = r.json().unwrap();
+    assert_eq!(body["status"], "ok", "chapter get: {:?}", body);
+    assert_eq!(body["data"]["id"], tc_id);
+    assert!(body["data"]["phase_name"].as_str().is_some());
+
+    // Test PUT /api/chapter/{id} (save)
+    let save = client
+        .put(format!("{}/api/chapter/{}", base, tc_id))
+        .json(&serde_json::json!({"content": "测试正文内容"}))
+        .send()
+        .unwrap()
+        .json::<serde_json::Value>()
+        .unwrap();
+    assert_eq!(save["status"], "ok");
+
+    // Test GET after save
+    let r2 = client
+        .get(format!("{}/api/chapter/{}", base, tc_id))
+        .send()
+        .unwrap()
+        .json::<serde_json::Value>()
+        .unwrap();
+    assert_eq!(r2["status"], "ok");
+    assert_eq!(r2["data"]["content"], "测试正文内容");
+
+    // Test sort ordering (#118 fix verification)
+    let ch2 = client
+        .post(format!("{}/api/command", base))
+        .json(&serde_json::json!({"command": "create_outline_chapter", "args": {"phase_id": phase_id, "name": "第二章"}}))
+        .send()
+        .unwrap()
+        .json::<serde_json::Value>()
+        .unwrap();
+    assert_eq!(ch2["status"], "ok");
+    assert_eq!(ch2["data"]["OutlineChapter"]["sort"], 1, "sort should increment: {:?}", ch2);
+
+    // Test project switch (#117)
+    let project2 = test_dir().join("pnw_server_test_2");
+    let _ = std::fs::remove_dir_all(&project2);
+    std::fs::create_dir_all(&project2).unwrap();
+    let out = run(&pnw, &["novel", "new", "project2"]);
+    assert!(out.contains("Created novel"), "create project2: {}", out);
+    let proj2_path = std::fs::canonicalize(project2.join("project2")).unwrap_or(project2.join("project2"));
+    let switch = client
+        .post(format!("{}/api/project/switch", base))
+        .json(&serde_json::json!({"path": proj2_path.to_str().unwrap()}))
+        .send()
+        .unwrap()
+        .json::<serde_json::Value>()
+        .unwrap();
+    assert_eq!(switch["status"], "ok", "switch project: {:?}", switch);
+    // Confirm we're on the new project
+    let proj = get("/api/project");
+    assert_eq!(proj["status"], "ok");
+    assert_eq!(proj["data"]["name"], "project2");
 
     // Gateway UI
     let html = client.get(base.to_string()).send().unwrap().text().unwrap();
