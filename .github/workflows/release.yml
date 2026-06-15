@@ -1,0 +1,153 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'   # v0.2.0-beta, v0.3.0, etc.
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # ── CLI binary (triple-platform matrix) ──
+  build-cli:
+    name: CLI (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.os != 'windows-latest' }}
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            ext: .exe
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            ext: ''
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            ext: ''
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable-${{ matrix.target }}
+      - name: Cache cargo dependencies
+        uses: Swatinem/rust-cache@v2
+      - name: Build release binary
+        run: cargo build -p pnw-kernel -p pnw --release --target ${{ matrix.target }}
+      - name: Run tests
+        run: cargo test -p pnw-kernel -p pnw --release --target ${{ matrix.target }}
+      - name: Rename binary
+        run: |
+          tag="${{ github.ref_name }}"
+          src="target/${{ matrix.target }}/release/pnw${{ matrix.ext }}"
+          dst="pnw-${tag}-${{ matrix.target }}${{ matrix.ext }}"
+          cp "$src" "$dst"
+          echo "artifact=$dst" >> $GITHUB_ENV
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pnw-${{ matrix.target }}
+          path: pnw-*
+
+  # ── Desktop app binary (Windows only, best-effort) ──
+  build-desktop:
+    name: Desktop (Windows)
+    runs-on: windows-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable-x86_64-pc-windows-msvc
+      - name: Cache cargo dependencies
+        uses: Swatinem/rust-cache@v2
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+          cache-dependency-path: desktop/package-lock.json
+      - name: Build frontend
+        run: |
+          cd desktop
+          npm ci
+          npm run build
+      - name: Build desktop binary
+        run: cargo build -p pnw-desktop --release
+      - name: Rename binary
+        run: |
+          $tag = "$env:GITHUB_REF_NAME"
+          Copy-Item "target/release/pnw-desktop.exe" "pnw-desktop-${tag}-x86_64-pc-windows-msvc.exe"
+          echo "artifact=pnw-desktop-${tag}-x86_64-pc-windows-msvc.exe" | Out-File -FilePath $env:GITHUB_ENV -Append
+        shell: pwsh
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pnw-desktop
+          path: pnw-desktop-*.exe
+
+  # ── npm package publish ──
+  publish-npm:
+    name: Publish npm
+    runs-on: ubuntu-latest
+    needs: [build-cli]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - name: Build and publish
+        run: |
+          cd packages/pnw-openclaw-plugin
+          npm ci
+          npm run build
+          npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  # ── GitHub Release ──
+  create-release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    needs: [build-cli, build-desktop, publish-npm]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: pnw-*
+          merge-multiple: true
+      - name: List artifacts
+        run: ls -la
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          body: |
+            # PNW ${{ github.ref_name }}
+
+            ## 安装
+
+            ### CLI
+            从下方 Assets 下载对应平台的二进制文件，解压后即可使用。
+
+            ### Desktop (Windows)
+            下载 `pnw-desktop-*.exe` 或通过 CI 构建的安装包。
+
+            ### OpenClaw 插件
+            ```bash
+            npm install -g pnw-openclaw-plugin
+            ```
+
+            ## 变更
+            _（待补充）_
+          files: |
+            pnw-*
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
