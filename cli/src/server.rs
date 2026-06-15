@@ -914,7 +914,7 @@ async fn api_command(
                 description: String::new(),
             };
             let result = handler.execute(cmd);
-            return dispatch_result(&*state, &body, result);
+            return dispatch_result(&state, &body, result);
         }
         "create_outline_chapter" => {
             let name = body
@@ -952,7 +952,7 @@ async fn api_command(
                 hook,
             };
             let result = handler.execute(cmd);
-            return dispatch_result(&*state, &body, result);
+            return dispatch_result(&state, &body, result);
         }
         "create_character" => DataCommand::CreateCharacter {
             id: uuid::Uuid::new_v4().to_string(),
@@ -993,7 +993,7 @@ async fn api_command(
                 name,
             };
             let result = handler.execute(cmd);
-            return dispatch_result(&*state, &body, result);
+            return dispatch_result(&state, &body, result);
         }
         "delete_character" => {
             let id = body
@@ -1073,7 +1073,7 @@ async fn api_command(
                 file_path,
             };
             let result = handler.execute(cmd);
-            return dispatch_result(&*state, &body, result);
+            return dispatch_result(&state, &body, result);
         }
         "write_setting" => DataCommand::WriteSetting {
             novel_id,
