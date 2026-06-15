@@ -154,7 +154,10 @@ fn test_server_integration() {
         .json::<serde_json::Value>()
         .unwrap();
     assert_eq!(outline_phase["status"], "ok");
-    let phase_id = outline_phase["data"]["OutlinePhase"]["id"].as_str().unwrap().to_string();
+    let phase_id = outline_phase["data"]["OutlinePhase"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
     let ch1 = client
         .post(format!("{}/api/command", base))
         .json(&serde_json::json!({"command": "create_outline_chapter", "args": {"phase_id": phase_id, "name": "第一章", "content": "开始", "hook": "悬念"}}))
@@ -174,7 +177,10 @@ fn test_server_integration() {
         .json::<serde_json::Value>()
         .unwrap();
     assert_eq!(text_phase["status"], "ok");
-    let text_phase_id = text_phase["data"]["TextPhase"]["id"].as_str().unwrap().to_string();
+    let text_phase_id = text_phase["data"]["TextPhase"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
     let text_ch = client
         .post(format!("{}/api/command", base))
         .json(&serde_json::json!({"command": "create_text_chapter", "args": {"phase_id": text_phase_id, "name": "第一章"}}))
@@ -183,14 +189,21 @@ fn test_server_integration() {
         .json::<serde_json::Value>()
         .unwrap();
     assert_eq!(text_ch["status"], "ok");
-    let tc_id = text_ch["data"]["TextChapter"]["id"].as_str().unwrap().to_string();
+    let tc_id = text_ch["data"]["TextChapter"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
     // Test GET /api/chapter/{id} (#116/#119)
     let r = client
         .get(format!("{}/api/chapter/{}", base, tc_id))
         .send()
         .unwrap();
-    assert!(r.status().is_success(), "GET /api/chapter/{{id}} returned {}", r.status());
+    assert!(
+        r.status().is_success(),
+        "GET /api/chapter/{{id}} returned {}",
+        r.status()
+    );
     let body: serde_json::Value = r.json().unwrap();
     assert_eq!(body["status"], "ok", "chapter get: {:?}", body);
     assert_eq!(body["data"]["id"], tc_id);
@@ -225,7 +238,11 @@ fn test_server_integration() {
         .json::<serde_json::Value>()
         .unwrap();
     assert_eq!(ch2["status"], "ok");
-    assert_eq!(ch2["data"]["OutlineChapter"]["sort"], 1, "sort should increment: {:?}", ch2);
+    assert_eq!(
+        ch2["data"]["OutlineChapter"]["sort"], 1,
+        "sort should increment: {:?}",
+        ch2
+    );
 
     // Test project switch (#117)
     let project2 = test_dir().join("pnw_server_test_2");
@@ -233,7 +250,8 @@ fn test_server_integration() {
     std::fs::create_dir_all(&project2).unwrap();
     let out = run(&pnw, &["novel", "new", "project2"]);
     assert!(out.contains("Created novel"), "create project2: {}", out);
-    let proj2_path = std::fs::canonicalize(project2.join("project2")).unwrap_or(project2.join("project2"));
+    let proj2_path =
+        std::fs::canonicalize(project2.join("project2")).unwrap_or(project2.join("project2"));
     let switch = client
         .post(format!("{}/api/project/switch", base))
         .json(&serde_json::json!({"path": proj2_path.to_str().unwrap()}))

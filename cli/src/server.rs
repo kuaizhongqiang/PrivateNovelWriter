@@ -324,7 +324,10 @@ async fn api_project_switch(
     }
     // Verify DB can be opened before switching
     if let Err(e) = rusqlite::Connection::open(new_path.join("project.db")) {
-        return Json(ApiResponse::err_inner(format!("Cannot open database: {}", e)));
+        return Json(ApiResponse::err_inner(format!(
+            "Cannot open database: {}",
+            e
+        )));
     }
     // Clean up orphan .tmp files from the new project
     storage::cleanup_orphan_tmp(&new_path).ok();
@@ -817,7 +820,11 @@ fn dispatch_result(
             if let Some(ref rid) = body.client_request_id {
                 if !rid.is_empty() {
                     let val = serde_json::to_value(&output).unwrap_or_default();
-                    state.idempotent_results.lock().unwrap().insert(rid.clone(), val);
+                    state
+                        .idempotent_results
+                        .lock()
+                        .unwrap()
+                        .insert(rid.clone(), val);
                 }
             }
             Json(ApiResponse::from_output(output))
