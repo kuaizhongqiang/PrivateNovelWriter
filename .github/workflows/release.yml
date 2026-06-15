@@ -50,6 +50,8 @@ jobs:
       - name: Build and publish
         run: |
           cd packages/pnw-openclaw-plugin
+          # 从 tag (v0.2.0-beta) 同步版本号到 package.json
+          npm version "${GITHUB_REF_NAME#v}" --no-git-tag-version
           npm ci
           npm run build
           npm publish --access public
