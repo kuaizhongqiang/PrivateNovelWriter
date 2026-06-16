@@ -54,7 +54,11 @@ jobs:
         run: |
           cd packages/pnw-openclaw-plugin
           version="${GITHUB_REF_NAME#v}"
-          npm version "$version" --no-git-tag-version
+          # 仅当版本不一致时才执行 npm version，避免 npm version 报错
+          current=$(node -p "require('./package.json').version")
+          if [ "$current" != "$version" ]; then
+            npm version "$version" --no-git-tag-version
+          fi
           npm ci
           npm run build
           # 检查版本是否已存在，避免重复发布失败
