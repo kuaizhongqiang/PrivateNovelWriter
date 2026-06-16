@@ -53,11 +53,17 @@ jobs:
       - name: Build and publish
         run: |
           cd packages/pnw-openclaw-plugin
-          # 从 tag (v0.2.0-beta) 同步版本号到 package.json
-          npm version "${GITHUB_REF_NAME#v}" --no-git-tag-version
+          version="${GITHUB_REF_NAME#v}"
+          npm version "$version" --no-git-tag-version
           npm ci
           npm run build
-          npm publish --access public
+          # 检查版本是否已存在，避免重复发布失败
+          existing=$(npm view "$(node -p "require('./package.json').name")" versions --json 2>/dev/null | node -p "JSON.parse(require('fs').readFileSync('/dev/stdin','utf8')).includes('$version')")
+          if [ "$existing" = "true" ]; then
+            echo "⚠️  npm 上已有 $version，跳过发布"
+          else
+            npm publish --access public
+          fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
@@ -65,9 +71,39 @@ jobs:
   create-release:
     name: Create Release
     runs-on: ubuntu-latest
-    needs: [build-cli, publish-npm]
+    needs: [build-cli]
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Generate release body
+        run: |
+          cat > /tmp/release-body.md << 'EOF'
+          # PNW ${{ github.ref_name }}
+
+          ## 安装
+
+          ### CLI (Linux)
+          ```bash
+          wget https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/pnw-${{ github.ref_name }}-x86_64-unknown-linux-gnu
+          chmod +x pnw-${{ github.ref_name }}-x86_64-unknown-linux-gnu
+          ./pnw-${{ github.ref_name }}-x86_64-unknown-linux-gnu server
+          ```
+
+          ### OpenClaw 插件
+          ```bash
+          npm install -g pnw-openclaw-plugin
+          ```
+          EOF
+          # 追加 changelog
+          prev_tag=$(git tag --list 'v*' --sort=-version:refname | head -2 | tail -1)
+          if [ -n "$prev_tag" ]; then
+            echo "" >> /tmp/release-body.md
+            echo "## 变更日志（自 $prev_tag 以来）" >> /tmp/release-body.md
+            echo "" >> /tmp/release-body.md
+            git log "$prev_tag"..HEAD --oneline --no-decorate >> /tmp/release-body.md
+          fi
+          # body_path 用硬编码路径
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
@@ -80,21 +116,7 @@ jobs:
         with:
           tag_name: ${{ github.ref_name }}
           name: ${{ github.ref_name }}
-          body: |
-            # PNW ${{ github.ref_name }}
-
-            ## 安装
-
-            ### CLI (Linux)
-            下载 `pnw-${{ github.ref_name }}-x86_64-unknown-linux-gnu`，赋予执行权限后使用。
-
-            ### OpenClaw 插件
-            ```bash
-            npm install -g pnw-openclaw-plugin
-            ```
-
-            ## 变更
-            _（待补充）_
+          body_path: /tmp/release-body.md
           files: |
             pnw-*
           draft: false
