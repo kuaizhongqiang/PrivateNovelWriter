@@ -212,7 +212,7 @@ export default defineToolPlugin({
       }),
       async execute(params, config) {
         const qs = params.limit ? `?limit=${params.limit}` : "";
-        return api(config.serverUrl, `/export/txt${qs}`);
+        return api(config.serverUrl, `/export/txt${qs}`, { method: "POST" });
       },
     }),
 
