@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use tokio::sync::Mutex as AsyncMutex;
 
 use axum::{
     extract::{Path as AxumPath, Query, State},
@@ -30,8 +29,6 @@ struct AppState {
     request_count: AtomicU64,
     /// Idempotency store: client_request_id → JSON result
     idempotent_results: std::sync::Mutex<HashMap<String, serde_json::Value>>,
-    /// Serializer for sort-sensitive create operations (#118 race condition fix)
-    sort_serializer: AsyncMutex<()>,
 }
 
 // ─── JSON envelope ───
@@ -148,7 +145,6 @@ pub async fn run_server(host: &str, port: u16, project: Option<&str>, cors_origi
         session_start,
         request_count: AtomicU64::new(0),
         idempotent_results: std::sync::Mutex::new(HashMap::new()),
-        sort_serializer: AsyncMutex::new(()),
     });
 
     let app = Router::new()
@@ -163,7 +159,7 @@ pub async fn run_server(host: &str, port: u16, project: Option<&str>, cors_origi
         .route("/api/outline", get(api_outline))
         .route("/api/chapters", get(api_chapters))
         .route(
-            "/api/chapter/{id}",
+            "/api/chapter/:id",
             get(api_chapter_get).put(api_chapter_save),
         )
         .route(
@@ -178,7 +174,7 @@ pub async fn run_server(host: &str, port: u16, project: Option<&str>, cors_origi
         .route("/api/stats", get(api_stats))
         .route("/api/agent/write", post(api_agent_write))
         .route("/api/agent/revise", post(api_agent_revise))
-        .route("/api/agent/evaluate/{id}", post(api_agent_evaluate))
+        .route("/api/agent/evaluate/:id", post(api_agent_evaluate))
         .route("/api/export/txt", post(api_export_txt))
         .route("/api/command", post(api_command))
         .layer(if cors_origin == "*" {
@@ -249,8 +245,8 @@ async fn api_tools() -> Json<serde_json::Value> {
             {"path":"/api/project/switch","method":"POST","description":"运行时切换项目（#117）"},
             {"path":"/api/outline","method":"GET","description":"大纲树"},
             {"path":"/api/chapters","method":"GET","description":"所有正文章节列表"},
-            {"path":"/api/chapter/{id}","method":"GET","description":"读取章节正文"},
-            {"path":"/api/chapter/{id}","method":"PUT","description":"保存章节正文"},
+            {"path":"/api/chapter/:id","method":"GET","description":"读取章节正文"},
+            {"path":"/api/chapter/:id","method":"PUT","description":"保存章节正文"},
             {"path":"/api/characters","method":"GET","description":"角色列表"},
             {"path":"/api/characters","method":"POST","description":"创建角色"},
             {"path":"/api/setting","method":"GET","description":"读取世界观设定"},
@@ -260,7 +256,7 @@ async fn api_tools() -> Json<serde_json::Value> {
             {"path":"/api/export/txt","method":"POST","description":"导出合并全文"},
             {"path":"/api/agent/write","method":"POST","description":"写正文（Agent B）"},
             {"path":"/api/agent/revise","method":"POST","description":"修改正文（Agent B）"},
-            {"path":"/api/agent/evaluate/{id}","method":"POST","description":"评估章节（Agent B）"},
+            {"path":"/api/agent/evaluate/:id","method":"POST","description":"评估章节（Agent B）"},
             {"path":"/api/command","method":"POST","description":"通用命令接口"},
             {"path":"/api/tools","method":"GET","description":"工具发现（本端点）"}
         ],
@@ -749,18 +745,18 @@ struct ExportQuery {
 async fn api_export_txt(
     State(state): State<Arc<AppState>>,
     Query(q): Query<ExportQuery>,
-) -> Json<serde_json::Value> {
+) -> Json<ApiResponse<serde_json::Value>> {
     let handler = match open_fresh_handler(&state) {
         Ok(h) => h,
-        Err(e) => return Json(serde_json::json!({"status":"error","error":e})),
+        Err(e) => return api_err(e),
     };
     let novel_id = match active_novel_id(&handler.conn) {
         Ok(id) => id,
-        Err(e) => return Json(serde_json::json!({"status":"error","error":e})),
+        Err(e) => return api_err(e),
     };
     let novel = match crud::get_novel(&handler.conn, &novel_id) {
         Ok(Some(n)) => n,
-        _ => return Json(serde_json::json!({"status":"error","error":"Novel not found"})),
+        _ => return api_err("Novel not found"),
     };
     let phases = crud::list_text_phases(&handler.conn, &novel_id).unwrap_or_default();
     let project_path = state.project_path.lock().unwrap().clone();
@@ -787,8 +783,7 @@ async fn api_export_txt(
             acc
         });
     let wc = merged.chars().filter(|c| !c.is_whitespace()).count() as u64;
-    Json(serde_json::json!({
-        "status":"ok",
+    api_ok(serde_json::json!({
         "novel_name": novel.name,
         "chapter_count": count,
         "returned_chapters": limited.len(),
@@ -809,7 +804,6 @@ struct CmdBody {
 }
 
 /// Helper: cache idempotency result and return JSON response.
-/// Used by sort-sensitive command arms that hold sort_serializer lock.
 fn dispatch_result(
     state: &AppState,
     body: &CmdBody,
@@ -895,7 +889,7 @@ async fn api_command(
                 phase_id: pid.to_string(),
             }
         }
-        // ── Sort-sensitive write commands (locked to prevent race condition #118) ──
+        // ── Write commands (sort assigned atomically by DB) ──
         "create_outline_phase" => {
             let name = body
                 .args
@@ -903,13 +897,10 @@ async fn api_command(
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string();
-            let _guard = state.sort_serializer.lock().await;
-            let phases = crud::list_outline_phases(&handler.conn, &novel_id).unwrap_or_default();
-            let sort = phases.iter().map(|p| p.sort).max().unwrap_or(-1) + 1;
             let cmd = DataCommand::CreateOutlinePhase {
                 id: uuid::Uuid::new_v4().to_string(),
                 novel_id,
-                sort,
+                sort: 0,
                 name,
                 description: String::new(),
             };
@@ -940,13 +931,10 @@ async fn api_command(
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string();
-            let _guard = state.sort_serializer.lock().await;
-            let chs = crud::list_outline_chapters(&handler.conn, pid).unwrap_or_default();
-            let sort = chs.iter().map(|c| c.sort).max().unwrap_or(-1) + 1;
             let cmd = DataCommand::CreateOutlineChapter {
                 id: uuid::Uuid::new_v4().to_string(),
                 phase_id: pid.to_string(),
-                sort,
+                sort: 0,
                 chapter_name: name,
                 content,
                 hook,
@@ -983,13 +971,10 @@ async fn api_command(
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string();
-            let _guard = state.sort_serializer.lock().await;
-            let phases = crud::list_text_phases(&handler.conn, &novel_id).unwrap_or_default();
-            let sort = phases.iter().map(|p| p.sort).max().unwrap_or(-1) + 1;
             let cmd = DataCommand::CreateTextPhase {
                 id: uuid::Uuid::new_v4().to_string(),
                 novel_id: novel_id.clone(),
-                sort,
+                sort: 0,
                 name,
             };
             let result = handler.execute(cmd);
@@ -1049,7 +1034,6 @@ async fn api_command(
                     |row| row.get(0),
                 )
                 .unwrap_or_else(|_| "unknown".to_string());
-            let _guard = state.sort_serializer.lock().await;
             let chs = crud::list_text_chapters(&handler.conn, &phase_id).unwrap_or_default();
             let sort = chs.iter().map(|c| c.sort).max().unwrap_or(-1) + 1;
             let file_path = format!("text/{}/ch-{:03}.txt", phase_name, sort);

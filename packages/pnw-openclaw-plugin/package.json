@@ -11,6 +11,9 @@
       "types": "./dist/index.d.ts"
     }
   },
+  "openclaw": {
+    "extensions": ["./dist/index.js"]
+  },
   "scripts": {
     "build": "tsc",
     "prepare": "npm run build"

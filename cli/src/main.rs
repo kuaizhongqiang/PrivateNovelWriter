@@ -739,13 +739,10 @@ fn handle_outline(
                 hook,
             } => {
                 let id = uuid::Uuid::new_v4().to_string();
-                // 获取当前最大 sort
-                let chapters = crud::list_outline_chapters(&handler.conn, phase_id)?;
-                let sort = chapters.iter().map(|c| c.sort).max().unwrap_or(-1) + 1;
                 handler.execute(DataCommand::CreateOutlineChapter {
                     id,
                     phase_id: phase_id.clone(),
-                    sort,
+                    sort: 0,
                     chapter_name: name.clone(),
                     content: content.clone().unwrap_or_default(),
                     hook: hook.clone().unwrap_or_default(),

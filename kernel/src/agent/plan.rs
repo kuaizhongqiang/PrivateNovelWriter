@@ -132,18 +132,13 @@ pub async fn execute_plan_outline(
             if let Ok(phases) = crud::list_outline_phases(conn, novel_id) {
                 if let Some(last) = phases.last() {
                     let oc_id = uuid::Uuid::new_v4().to_string();
-                    let chapters = crud::list_outline_chapters(conn, &last.id).ok();
-                    let sort = chapters
-                        .as_ref()
-                        .and_then(|c| c.last().map(|ch| ch.sort + 1))
-                        .unwrap_or(0);
                     let hook = parts.get(2).map(|s| s.trim()).unwrap_or("");
                     if let Err(e) = crud::create_outline_chapter(
                         conn,
                         &OutlineChapter {
                             id: oc_id,
                             phase_id: last.id.clone(),
-                            sort,
+                            sort: 0, // sort is auto-assigned atomically by DB
                             chapter_name: name.to_string(),
                             content: desc.to_string(),
                             hook: hook.to_string(),
