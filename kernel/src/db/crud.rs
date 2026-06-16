@@ -264,7 +264,7 @@ pub fn delete_plugin(conn: &Connection, novel_id: &str) -> Result<()> {
 pub fn create_outline_phase(conn: &Connection, p: &OutlinePhase) -> Result<()> {
     conn.execute(
         "INSERT INTO outline_phase (id, novel_id, sort, name, description)
-         VALUES (?1, ?2, COALESCE((SELECT MAX(sort) FROM outline_phase WHERE novel_id = ?2), -1) + 1, ?4, ?5)",
+         VALUES (?1, ?2, COALESCE((SELECT MAX(sort) FROM outline_phase WHERE novel_id = ?2), -1) + 1, ?3, ?4)",
         params![p.id, p.novel_id, p.name, p.description],
     )?;
     Ok(())
@@ -409,7 +409,7 @@ pub fn find_outline_chapter_by_text_id(
 
 pub fn create_text_phase(conn: &Connection, p: &TextPhase) -> Result<()> {
     conn.execute(
-        "INSERT INTO text_phase (id, novel_id, sort, name) VALUES (?1, ?2, COALESCE((SELECT MAX(sort) FROM text_phase WHERE novel_id = ?2), -1) + 1, ?4)",
+        "INSERT INTO text_phase (id, novel_id, sort, name) VALUES (?1, ?2, COALESCE((SELECT MAX(sort) FROM text_phase WHERE novel_id = ?2), -1) + 1, ?3)",
         params![p.id, p.novel_id, p.name],
     )?;
     Ok(())
@@ -444,7 +444,7 @@ pub fn delete_text_phase(conn: &Connection, phase_id: &str) -> Result<()> {
 pub fn create_text_chapter(conn: &Connection, c: &TextChapter) -> Result<()> {
     conn.execute(
         "INSERT INTO text_chapter (id, phase_id, sort, name, file_path, word_count)
-         VALUES (?1, ?2, COALESCE((SELECT MAX(sort) FROM text_chapter WHERE phase_id = ?2), -1) + 1, ?4, ?5, ?6)",
+         VALUES (?1, ?2, COALESCE((SELECT MAX(sort) FROM text_chapter WHERE phase_id = ?2), -1) + 1, ?3, ?4, ?5)",
         params![c.id, c.phase_id, c.name, c.file_path, c.word_count],
     )?;
     Ok(())
