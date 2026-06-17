@@ -877,23 +877,31 @@ fn handle_text(
                         // outline chapter：检查是否有已关联的 text chapter
                         if let Some(text_id) = oc.text_chapter_id {
                             crud::get_text_chapter(&handler.conn, &text_id)?.ok_or_else(|| {
-                                pnw_kernel::handler::HandlerError::NotFound(
-                                    format!("Text chapter {} (linked from outline)", text_id),
-                                )
+                                pnw_kernel::handler::HandlerError::NotFound(format!(
+                                    "Text chapter {} (linked from outline)",
+                                    text_id
+                                ))
                             })?
                         } else {
                             // 自动创建正文章节（复用 Create 逻辑）
                             let novel_id = get_active_novel_id(&handler.conn);
-                            let outline_phases = crud::list_outline_phases(&handler.conn, &novel_id)?;
-                            let outline_phase = outline_phases.iter()
+                            let outline_phases =
+                                crud::list_outline_phases(&handler.conn, &novel_id)?;
+                            let outline_phase = outline_phases
+                                .iter()
                                 .find(|p| p.id == oc.phase_id)
-                                .ok_or_else(|| pnw_kernel::handler::HandlerError::NotFound(
-                                    format!("Outline phase {} for chapter", oc.phase_id),
-                                ))?;
+                                .ok_or_else(|| {
+                                    pnw_kernel::handler::HandlerError::NotFound(format!(
+                                        "Outline phase {} for chapter",
+                                        oc.phase_id
+                                    ))
+                                })?;
 
                             // 查找或创建正文卷
                             let text_phases = crud::list_text_phases(&handler.conn, &novel_id)?;
-                            let text_phase_id = if let Some(tp) = text_phases.iter().find(|tp| tp.sort == outline_phase.sort) {
+                            let text_phase_id = if let Some(tp) =
+                                text_phases.iter().find(|tp| tp.sort == outline_phase.sort)
+                            {
                                 tp.id.clone()
                             } else if let Some(tp) = text_phases.first() {
                                 tp.id.clone()
@@ -913,11 +921,14 @@ fn handle_text(
                             };
 
                             // 获取卷名
-                            let phase_name: String = handler.conn.query_row(
-                                "SELECT name FROM text_phase WHERE id = ?1",
-                                rusqlite::params![text_phase_id],
-                                |row| row.get(0),
-                            ).unwrap_or_else(|_| "unknown".to_string());
+                            let phase_name: String = handler
+                                .conn
+                                .query_row(
+                                    "SELECT name FROM text_phase WHERE id = ?1",
+                                    rusqlite::params![text_phase_id],
+                                    |row| row.get(0),
+                                )
+                                .unwrap_or_else(|_| "unknown".to_string());
 
                             // 创建正文章节
                             let tc_id = uuid::Uuid::new_v4().to_string();
@@ -956,9 +967,10 @@ fn handle_text(
                             })?
                         }
                     } else {
-                        return Err(pnw_kernel::handler::HandlerError::NotFound(
-                            format!("Chapter {} not found (neither text nor outline)", id),
-                        ));
+                        return Err(pnw_kernel::handler::HandlerError::NotFound(format!(
+                            "Chapter {} not found (neither text nor outline)",
+                            id
+                        )));
                     }
                 };
 

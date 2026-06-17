@@ -177,12 +177,15 @@ pub async fn run_server(host: &str, port: u16, project: Option<&str>, cors_origi
             "/api/setting",
             get(api_setting_get).post(api_setting_update),
         )
-        .route("/api/samples", get(api_samples_list).post(api_sample_create))
-        .route("/api/samples/:id", put(api_sample_update).delete(api_sample_delete))
         .route(
-            "/api/novels",
-            get(api_novels_list).post(api_novel_create),
+            "/api/samples",
+            get(api_samples_list).post(api_sample_create),
         )
+        .route(
+            "/api/samples/:id",
+            put(api_sample_update).delete(api_sample_delete),
+        )
+        .route("/api/novels", get(api_novels_list).post(api_novel_create))
         .route(
             "/api/novels/:id",
             put(api_novel_update).delete(api_novel_delete),
@@ -799,9 +802,10 @@ async fn api_sample_update(
         Err(e) => return api_err(e),
     };
     // 获取现有记录以保留未提供的字段
-    let existing = crud::list_samples(&handler.conn, &novel_id).ok()
+    let existing = crud::list_samples(&handler.conn, &novel_id)
+        .ok()
         .and_then(|list| list.into_iter().find(|s| s.id == id));
-    let(title, content) = match existing {
+    let (title, content) = match existing {
         Some(s) => (
             body.title.unwrap_or(s.title),
             body.content.unwrap_or(s.content),
@@ -1362,9 +1366,22 @@ async fn api_command(
         }
         // ── Novel CRUD (multi-project support) ──
         "create_novel" => {
-            let name = body.args.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let total_char = body.args.get("total_char").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
-            let chapter_char = body.args.get("chapter_char").and_then(|v| v.as_i64()).unwrap_or(2000) as i32;
+            let name = body
+                .args
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let total_char = body
+                .args
+                .get("total_char")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(0) as i32;
+            let chapter_char = body
+                .args
+                .get("chapter_char")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(2000) as i32;
             let cmd = DataCommand::CreateNovel {
                 id: uuid::Uuid::new_v4().to_string(),
                 name,
@@ -1383,18 +1400,45 @@ async fn api_command(
         }
         "list_novels" => DataCommand::ListNovels,
         "switch_novel" => {
-            let id = body.args.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let id = body
+                .args
+                .get("id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
             DataCommand::SwitchNovel { id }
         }
         "delete_novel" => {
-            let id = body.args.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let id = body
+                .args
+                .get("id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
             DataCommand::DeleteNovel { id }
         }
         "update_novel" => {
-            let id = body.args.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let name = body.args.get("name").and_then(|v| v.as_str()).map(String::from);
-            let total_char = body.args.get("total_char").and_then(|v| v.as_i64()).map(|v| v as i32);
-            let chapter_char = body.args.get("chapter_char").and_then(|v| v.as_i64()).map(|v| v as i32);
+            let id = body
+                .args
+                .get("id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let name = body
+                .args
+                .get("name")
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            let total_char = body
+                .args
+                .get("total_char")
+                .and_then(|v| v.as_i64())
+                .map(|v| v as i32);
+            let chapter_char = body
+                .args
+                .get("chapter_char")
+                .and_then(|v| v.as_i64())
+                .map(|v| v as i32);
             DataCommand::UpdateNovel {
                 id,
                 name,
@@ -1405,17 +1449,44 @@ async fn api_command(
         }
         // ── Outline Chapter / Phase 管理 ──
         "get_outline_chapter" => {
-            let id = body.args.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let id = body
+                .args
+                .get("id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
             DataCommand::GetOutlineChapter { id }
         }
         "update_outline_chapter" => {
-            let id = body.args.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let chapter_name = body.args.get("chapter_name").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let content = body.args.get("content").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let hook = body.args.get("hook").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let id = body
+                .args
+                .get("id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let chapter_name = body
+                .args
+                .get("chapter_name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let content = body
+                .args
+                .get("content")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let hook = body
+                .args
+                .get("hook")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
             // 获取现有记录以保留未提供的字段
             let existing = crud::get_outline_chapter(&handler.conn, &id).ok().flatten();
-            let (phase_id, sort, text_chapter_id) = existing.map(|e| (e.phase_id, e.sort, e.text_chapter_id)).unwrap_or_default();
+            let (phase_id, sort, text_chapter_id) = existing
+                .map(|e| (e.phase_id, e.sort, e.text_chapter_id))
+                .unwrap_or_default();
             DataCommand::UpdateOutlineChapter {
                 id,
                 phase_id,
@@ -1427,9 +1498,20 @@ async fn api_command(
             }
         }
         "update_outline_phase" => {
-            let id = body.args.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let name = body.args.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let existing = crud::list_outline_phases(&handler.conn, &novel_id).ok()
+            let id = body
+                .args
+                .get("id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let name = body
+                .args
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let existing = crud::list_outline_phases(&handler.conn, &novel_id)
+                .ok()
                 .and_then(|list| list.into_iter().find(|p| p.id == id));
             let (novel_id_for_phase, sort, description) = existing
                 .map(|e| (e.novel_id, e.sort, e.description))
@@ -1444,8 +1526,18 @@ async fn api_command(
         }
         // ── Sample CRUD ──
         "create_sample" => {
-            let title = body.args.get("title").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let content = body.args.get("content").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let title = body
+                .args
+                .get("title")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let content = body
+                .args
+                .get("content")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
             DataCommand::CreateSample {
                 id: uuid::Uuid::new_v4().to_string(),
                 novel_id,
@@ -1454,13 +1546,29 @@ async fn api_command(
             }
         }
         "update_sample" => {
-            let id = body.args.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let existing = crud::list_samples(&handler.conn, &novel_id).ok()
+            let id = body
+                .args
+                .get("id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let existing = crud::list_samples(&handler.conn, &novel_id)
+                .ok()
                 .and_then(|list| list.into_iter().find(|s| s.id == id));
             let (title, content) = existing
                 .map(|s| {
-                    let title = body.args.get("title").and_then(|v| v.as_str()).map(String::from).unwrap_or(s.title);
-                    let content = body.args.get("content").and_then(|v| v.as_str()).map(String::from).unwrap_or(s.content);
+                    let title = body
+                        .args
+                        .get("title")
+                        .and_then(|v| v.as_str())
+                        .map(String::from)
+                        .unwrap_or(s.title);
+                    let content = body
+                        .args
+                        .get("content")
+                        .and_then(|v| v.as_str())
+                        .map(String::from)
+                        .unwrap_or(s.content);
                     (title, content)
                 })
                 .unwrap_or_default();
@@ -1472,7 +1580,12 @@ async fn api_command(
             }
         }
         "delete_sample" => {
-            let id = body.args.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let id = body
+                .args
+                .get("id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
             DataCommand::DeleteSample { id }
         }
         _ => return api_err(format!("Unknown command: {}", body.command)),

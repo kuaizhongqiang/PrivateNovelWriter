@@ -43,25 +43,25 @@ fn resolve_or_create_text_chapter(
     // 查找或创建对应的正文卷（text_phase）
     let text_phases = crud::list_text_phases(conn, novel_id)
         .map_err(|e| LlmError::Api(format!("DB error: {}", e)))?;
-    let text_phase_id = if let Some(tp) = text_phases.iter().find(|tp| tp.sort == outline_phase.sort)
-    {
-        tp.id.clone()
-    } else if let Some(tp) = text_phases.first() {
-        // 没有 sort 匹配的，用第一个正文卷
-        tp.id.clone()
-    } else {
-        // 没有正文卷，创建一个与大纲卷同名的
-        let id = uuid::Uuid::new_v4().to_string();
-        let tp = crate::models::TextPhase {
-            id: id.clone(),
-            novel_id: novel_id.to_string(),
-            sort: outline_phase.sort,
-            name: outline_phase.name.clone(),
+    let text_phase_id =
+        if let Some(tp) = text_phases.iter().find(|tp| tp.sort == outline_phase.sort) {
+            tp.id.clone()
+        } else if let Some(tp) = text_phases.first() {
+            // 没有 sort 匹配的，用第一个正文卷
+            tp.id.clone()
+        } else {
+            // 没有正文卷，创建一个与大纲卷同名的
+            let id = uuid::Uuid::new_v4().to_string();
+            let tp = crate::models::TextPhase {
+                id: id.clone(),
+                novel_id: novel_id.to_string(),
+                sort: outline_phase.sort,
+                name: outline_phase.name.clone(),
+            };
+            crud::create_text_phase(conn, &tp)
+                .map_err(|e| LlmError::Api(format!("DB error: {}", e)))?;
+            id
         };
-        crud::create_text_phase(conn, &tp)
-            .map_err(|e| LlmError::Api(format!("DB error: {}", e)))?;
-        id
-    };
 
     // 获取正文卷名用于文件路径
     let phase_name: String = conn
@@ -81,8 +81,7 @@ fn resolve_or_create_text_chapter(
 
     // 确保目录存在
     let full_path = project_path.join(&file_path);
-    storage::ensure_dir(&full_path)
-        .map_err(|e| LlmError::Api(format!("IO error: {}", e)))?;
+    storage::ensure_dir(&full_path).map_err(|e| LlmError::Api(format!("IO error: {}", e)))?;
 
     let tc = crate::models::TextChapter {
         id: tc_id.clone(),
@@ -92,8 +91,7 @@ fn resolve_or_create_text_chapter(
         file_path,
         word_count: 0,
     };
-    crud::create_text_chapter(conn, &tc)
-        .map_err(|e| LlmError::Api(format!("DB error: {}", e)))?;
+    crud::create_text_chapter(conn, &tc).map_err(|e| LlmError::Api(format!("DB error: {}", e)))?;
 
     // 更新大纲章节的 text_chapter_id
     let mut oc = oc;
