@@ -104,6 +104,14 @@ impl Handler {
                 )?;
                 Ok(Output::Ok)
             }
+            DataCommand::SwitchNovel { id } => {
+                crud::switch_novel(&self.conn, &id)?;
+                Ok(Output::Ok)
+            }
+            DataCommand::DeleteNovel { id } => {
+                crud::delete_novel(&self.conn, &id)?;
+                Ok(Output::Ok)
+            }
 
             // ── Setting ──
             DataCommand::WriteSetting {
@@ -430,6 +438,21 @@ impl Handler {
             DataCommand::ListSamples { novel_id } => {
                 let list = crud::list_samples(&self.conn, &novel_id)?;
                 Ok(Output::SampleList(list))
+            }
+            DataCommand::UpdateSample {
+                id,
+                novel_id,
+                title,
+                content,
+            } => {
+                let s = DetailSample {
+                    id,
+                    novel_id,
+                    title,
+                    content,
+                };
+                crud::update_sample(&self.conn, &s)?;
+                Ok(Output::Status(format!("Updated sample: {}", s.title)))
             }
             DataCommand::DeleteSample { id } => {
                 crud::delete_sample(&self.conn, &id)?;

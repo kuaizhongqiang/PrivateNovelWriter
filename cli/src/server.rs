@@ -7,7 +7,7 @@ use axum::{
     extract::{Path as AxumPath, Query, State},
     http::Method,
     response::{Html, IntoResponse, Json},
-    routing::{get, post},
+    routing::{get, post, put},
     Router,
 };
 use pnw_kernel::command::agent::AgentCommand;
@@ -100,6 +100,13 @@ fn open_fresh_handler(state: &AppState) -> Result<Handler, String> {
 
 fn active_novel_id(conn: &rusqlite::Connection) -> Result<String, String> {
     let list = crud::list_novels(conn).map_err(|e| e.to_string())?;
+    // 优先返回 active 标记的小说
+    for novel in &list {
+        if novel.active {
+            return Ok(novel.id.clone());
+        }
+    }
+    // 无 active 则取第一个
     list.first()
         .map(|n| n.id.clone())
         .ok_or_else(|| "No novels found".into())
@@ -170,7 +177,17 @@ pub async fn run_server(host: &str, port: u16, project: Option<&str>, cors_origi
             "/api/setting",
             get(api_setting_get).post(api_setting_update),
         )
-        .route("/api/samples", get(api_samples_list))
+        .route("/api/samples", get(api_samples_list).post(api_sample_create))
+        .route("/api/samples/:id", put(api_sample_update).delete(api_sample_delete))
+        .route(
+            "/api/novels",
+            get(api_novels_list).post(api_novel_create),
+        )
+        .route(
+            "/api/novels/:id",
+            put(api_novel_update).delete(api_novel_delete),
+        )
+        .route("/api/novels/:id/switch", post(api_novel_switch))
         .route("/api/stats", get(api_stats))
         .route("/api/agent/write", post(api_agent_write))
         .route("/api/agent/revise", post(api_agent_revise))
@@ -252,6 +269,14 @@ async fn api_tools() -> Json<serde_json::Value> {
             {"path":"/api/setting","method":"GET","description":"读取世界观设定"},
             {"path":"/api/setting","method":"POST","description":"更新世界观设定"},
             {"path":"/api/samples","method":"GET","description":"文风样例列表"},
+            {"path":"/api/samples","method":"POST","description":"新增文风样例"},
+            {"path":"/api/samples/:id","method":"PUT","description":"修改文风样例"},
+            {"path":"/api/samples/:id","method":"DELETE","description":"删除文风样例"},
+            {"path":"/api/novels","method":"GET","description":"所有小说列表"},
+            {"path":"/api/novels","method":"POST","description":"创建新小说"},
+            {"path":"/api/novels/:id","method":"PUT","description":"更新小说信息"},
+            {"path":"/api/novels/:id","method":"DELETE","description":"删除小说"},
+            {"path":"/api/novels/:id/switch","method":"POST","description":"切换当前小说"},
             {"path":"/api/stats","method":"GET","description":"项目统计"},
             {"path":"/api/export/txt","method":"POST","description":"导出合并全文"},
             {"path":"/api/agent/write","method":"POST","description":"写正文（Agent B）"},
@@ -263,12 +288,23 @@ async fn api_tools() -> Json<serde_json::Value> {
         "commands": [
             {"name":"get_outline","params":"none","description":"读取完整大纲树"},
             {"name":"get_novel","params":"none","description":"小说基本信息"},
+            {"name":"list_novels","params":"none","description":"所有小说列表"},
+            {"name":"create_novel","params":{"name":"string","total_char?":"number","chapter_char?":"number"},"description":"创建新小说"},
+            {"name":"switch_novel","params":{"id":"string"},"description":"切换当前小说"},
+            {"name":"delete_novel","params":{"id":"string"},"description":"删除小说及其全部数据"},
+            {"name":"update_novel","params":{"name?":"string","total_char?":"number","chapter_char?":"number"},"description":"更新小说信息（含字数目标）"},
             {"name":"list_characters","params":"none","description":"角色列表"},
             {"name":"get_setting","params":"none","description":"世界观设定"},
             {"name":"list_samples","params":"none","description":"文风样例"},
+            {"name":"create_sample","params":{"title":"string","content":"string"},"description":"新增文风样例"},
+            {"name":"update_sample","params":{"id":"string","title?":"string","content?":"string"},"description":"修改文风样例"},
+            {"name":"delete_sample","params":{"id":"string"},"description":"删除文风样例"},
             {"name":"get_plugin","params":"none","description":"金手指设定"},
             {"name":"list_outline_phases","params":"none","description":"大纲卷列表"},
             {"name":"list_outline_chapters","params":{"phase_id":"string"},"description":"卷下大纲章"},
+            {"name":"get_outline_chapter","params":{"id":"string"},"description":"单个大纲章详情"},
+            {"name":"update_outline_chapter","params":{"id":"string","chapter_name?":"string","content?":"string","hook?":"string"},"description":"修改大纲章"},
+            {"name":"update_outline_phase","params":{"id":"string","name?":"string"},"description":"修改大纲卷"},
             {"name":"list_text_phases","params":"none","description":"正文卷列表"},
             {"name":"list_text_chapters","params":{"phase_id":"string"},"description":"卷下正文章"},
             {"name":"create_outline_phase","params":{"name":"string"},"description":"创建大纲卷"},
@@ -329,6 +365,116 @@ async fn api_project_switch(
     storage::cleanup_orphan_tmp(&new_path).ok();
     *state.project_path.lock().unwrap() = new_path;
     Json(ApiResponse::ok("switched"))
+}
+
+// ─── Novel REST CRUD (#127) ───
+
+async fn api_novels_list(
+    State(state): State<Arc<AppState>>,
+) -> Json<ApiResponse<serde_json::Value>> {
+    let handler = match open_fresh_handler(&state) {
+        Ok(h) => h,
+        Err(e) => return api_err(e),
+    };
+    match handler.execute(DataCommand::ListNovels) {
+        Ok(output) => Json(ApiResponse::from_output(output)),
+        Err(e) => api_err(e.to_string()),
+    }
+}
+
+#[derive(Deserialize)]
+struct CreateNovelBody {
+    name: String,
+    total_char: Option<i32>,
+    chapter_char: Option<i32>,
+}
+
+async fn api_novel_create(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<CreateNovelBody>,
+) -> Json<ApiResponse<serde_json::Value>> {
+    let handler = match open_fresh_handler(&state) {
+        Ok(h) => h,
+        Err(e) => return api_err(e),
+    };
+    let id = uuid::Uuid::new_v4().to_string();
+    let cmd = DataCommand::CreateNovel {
+        id: id.clone(),
+        name: body.name,
+        total_char: body.total_char.unwrap_or(0),
+        chapter_char: body.chapter_char.unwrap_or(2000),
+        sensitivity: 0,
+    };
+    let result = handler.execute(cmd);
+    // 自动切换到新小说
+    if let Ok(ref output) = result {
+        if let Output::Novel(ref n) = output {
+            let _ = crud::switch_novel(&handler.conn, &n.id);
+        }
+    }
+    match result {
+        Ok(output) => Json(ApiResponse::from_output(output)),
+        Err(e) => api_err(e.to_string()),
+    }
+}
+
+#[derive(Deserialize)]
+struct UpdateNovelBody {
+    name: Option<String>,
+    total_char: Option<i32>,
+    chapter_char: Option<i32>,
+}
+
+async fn api_novel_update(
+    State(state): State<Arc<AppState>>,
+    AxumPath(id): AxumPath<String>,
+    Json(body): Json<UpdateNovelBody>,
+) -> Json<ApiResponse<&'static str>> {
+    let handler = match open_fresh_handler(&state) {
+        Ok(h) => h,
+        Err(e) => return Json(ApiResponse::err_inner(e)),
+    };
+    let cmd = DataCommand::UpdateNovel {
+        id,
+        name: body.name,
+        total_char: body.total_char,
+        chapter_char: body.chapter_char,
+        sensitivity: None,
+    };
+    match handler.execute(cmd) {
+        Ok(_) => Json(ApiResponse::ok("updated")),
+        Err(e) => Json(ApiResponse::err_inner(e.to_string())),
+    }
+}
+
+async fn api_novel_delete(
+    State(state): State<Arc<AppState>>,
+    AxumPath(id): AxumPath<String>,
+) -> Json<ApiResponse<&'static str>> {
+    let handler = match open_fresh_handler(&state) {
+        Ok(h) => h,
+        Err(e) => return Json(ApiResponse::err_inner(e)),
+    };
+    let cmd = DataCommand::DeleteNovel { id };
+    match handler.execute(cmd) {
+        Ok(_) => Json(ApiResponse::ok("deleted")),
+        Err(e) => Json(ApiResponse::err_inner(e.to_string())),
+    }
+}
+
+async fn api_novel_switch(
+    State(state): State<Arc<AppState>>,
+    AxumPath(id): AxumPath<String>,
+) -> Json<ApiResponse<&'static str>> {
+    let handler = match open_fresh_handler(&state) {
+        Ok(h) => h,
+        Err(e) => return Json(ApiResponse::err_inner(e)),
+    };
+    let cmd = DataCommand::SwitchNovel { id };
+    match handler.execute(cmd) {
+        Ok(_) => Json(ApiResponse::ok("switched")),
+        Err(e) => Json(ApiResponse::err_inner(e.to_string())),
+    }
 }
 
 async fn api_outline(State(state): State<Arc<AppState>>) -> Json<ApiResponse<serde_json::Value>> {
@@ -600,6 +746,92 @@ async fn api_samples_list(
     match handler.execute(DataCommand::ListSamples { novel_id }) {
         Ok(output) => Json(ApiResponse::from_output(output)),
         Err(e) => api_err(e.to_string()),
+    }
+}
+
+#[derive(Deserialize)]
+struct CreateSampleBody {
+    title: String,
+    content: String,
+}
+
+async fn api_sample_create(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<CreateSampleBody>,
+) -> Json<ApiResponse<serde_json::Value>> {
+    let handler = match open_fresh_handler(&state) {
+        Ok(h) => h,
+        Err(e) => return api_err(e),
+    };
+    let novel_id = match active_novel_id(&handler.conn) {
+        Ok(id) => id,
+        Err(e) => return api_err(e),
+    };
+    let cmd = DataCommand::CreateSample {
+        id: uuid::Uuid::new_v4().to_string(),
+        novel_id,
+        title: body.title,
+        content: body.content,
+    };
+    match handler.execute(cmd) {
+        Ok(output) => Json(ApiResponse::from_output(output)),
+        Err(e) => api_err(e.to_string()),
+    }
+}
+
+#[derive(Deserialize)]
+struct UpdateSampleBody {
+    title: Option<String>,
+    content: Option<String>,
+}
+
+async fn api_sample_update(
+    State(state): State<Arc<AppState>>,
+    AxumPath(id): AxumPath<String>,
+    Json(body): Json<UpdateSampleBody>,
+) -> Json<ApiResponse<serde_json::Value>> {
+    let handler = match open_fresh_handler(&state) {
+        Ok(h) => h,
+        Err(e) => return api_err(e),
+    };
+    let novel_id = match active_novel_id(&handler.conn) {
+        Ok(id) => id,
+        Err(e) => return api_err(e),
+    };
+    // 获取现有记录以保留未提供的字段
+    let existing = crud::list_samples(&handler.conn, &novel_id).ok()
+        .and_then(|list| list.into_iter().find(|s| s.id == id));
+    let(title, content) = match existing {
+        Some(s) => (
+            body.title.unwrap_or(s.title),
+            body.content.unwrap_or(s.content),
+        ),
+        None => return api_err("Sample not found"),
+    };
+    let cmd = DataCommand::UpdateSample {
+        id,
+        novel_id,
+        title,
+        content,
+    };
+    match handler.execute(cmd) {
+        Ok(output) => Json(ApiResponse::from_output(output)),
+        Err(e) => api_err(e.to_string()),
+    }
+}
+
+async fn api_sample_delete(
+    State(state): State<Arc<AppState>>,
+    AxumPath(id): AxumPath<String>,
+) -> Json<ApiResponse<&'static str>> {
+    let handler = match open_fresh_handler(&state) {
+        Ok(h) => h,
+        Err(e) => return Json(ApiResponse::err_inner(e)),
+    };
+    let cmd = DataCommand::DeleteSample { id };
+    match handler.execute(cmd) {
+        Ok(_) => Json(ApiResponse::ok("deleted")),
+        Err(e) => Json(ApiResponse::err_inner(e.to_string())),
     }
 }
 
@@ -1127,6 +1359,121 @@ async fn api_command(
                 }));
             }
             return api_ok(serde_json::json!(result));
+        }
+        // ── Novel CRUD (multi-project support) ──
+        "create_novel" => {
+            let name = body.args.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let total_char = body.args.get("total_char").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+            let chapter_char = body.args.get("chapter_char").and_then(|v| v.as_i64()).unwrap_or(2000) as i32;
+            let cmd = DataCommand::CreateNovel {
+                id: uuid::Uuid::new_v4().to_string(),
+                name,
+                total_char,
+                chapter_char,
+                sensitivity: 0,
+            };
+            let result = handler.execute(cmd);
+            // 自动切换到新小说
+            if let Ok(ref output) = result {
+                if let Output::Novel(ref n) = output {
+                    let _ = crud::switch_novel(&handler.conn, &n.id);
+                }
+            }
+            return dispatch_result(&state, &body, result);
+        }
+        "list_novels" => DataCommand::ListNovels,
+        "switch_novel" => {
+            let id = body.args.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            DataCommand::SwitchNovel { id }
+        }
+        "delete_novel" => {
+            let id = body.args.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            DataCommand::DeleteNovel { id }
+        }
+        "update_novel" => {
+            let id = body.args.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let name = body.args.get("name").and_then(|v| v.as_str()).map(String::from);
+            let total_char = body.args.get("total_char").and_then(|v| v.as_i64()).map(|v| v as i32);
+            let chapter_char = body.args.get("chapter_char").and_then(|v| v.as_i64()).map(|v| v as i32);
+            DataCommand::UpdateNovel {
+                id,
+                name,
+                total_char,
+                chapter_char,
+                sensitivity: None,
+            }
+        }
+        // ── Outline Chapter / Phase 管理 ──
+        "get_outline_chapter" => {
+            let id = body.args.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            DataCommand::GetOutlineChapter { id }
+        }
+        "update_outline_chapter" => {
+            let id = body.args.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let chapter_name = body.args.get("chapter_name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let content = body.args.get("content").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let hook = body.args.get("hook").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            // 获取现有记录以保留未提供的字段
+            let existing = crud::get_outline_chapter(&handler.conn, &id).ok().flatten();
+            let (phase_id, sort, text_chapter_id) = existing.map(|e| (e.phase_id, e.sort, e.text_chapter_id)).unwrap_or_default();
+            DataCommand::UpdateOutlineChapter {
+                id,
+                phase_id,
+                sort,
+                chapter_name,
+                content,
+                hook,
+                text_chapter_id,
+            }
+        }
+        "update_outline_phase" => {
+            let id = body.args.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let name = body.args.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let existing = crud::list_outline_phases(&handler.conn, &novel_id).ok()
+                .and_then(|list| list.into_iter().find(|p| p.id == id));
+            let (novel_id_for_phase, sort, description) = existing
+                .map(|e| (e.novel_id, e.sort, e.description))
+                .unwrap_or_else(|| (novel_id.clone(), 0, String::new()));
+            DataCommand::UpdateOutlinePhase {
+                id,
+                novel_id: novel_id_for_phase,
+                sort,
+                name,
+                description,
+            }
+        }
+        // ── Sample CRUD ──
+        "create_sample" => {
+            let title = body.args.get("title").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let content = body.args.get("content").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            DataCommand::CreateSample {
+                id: uuid::Uuid::new_v4().to_string(),
+                novel_id,
+                title,
+                content,
+            }
+        }
+        "update_sample" => {
+            let id = body.args.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let existing = crud::list_samples(&handler.conn, &novel_id).ok()
+                .and_then(|list| list.into_iter().find(|s| s.id == id));
+            let (title, content) = existing
+                .map(|s| {
+                    let title = body.args.get("title").and_then(|v| v.as_str()).map(String::from).unwrap_or(s.title);
+                    let content = body.args.get("content").and_then(|v| v.as_str()).map(String::from).unwrap_or(s.content);
+                    (title, content)
+                })
+                .unwrap_or_default();
+            DataCommand::UpdateSample {
+                id,
+                novel_id,
+                title,
+                content,
+            }
+        }
+        "delete_sample" => {
+            let id = body.args.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            DataCommand::DeleteSample { id }
         }
         _ => return api_err(format!("Unknown command: {}", body.command)),
     };

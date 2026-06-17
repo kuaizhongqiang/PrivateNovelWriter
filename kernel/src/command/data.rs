@@ -20,6 +20,12 @@ pub enum DataCommand {
         chapter_char: Option<i32>,
         sensitivity: Option<i32>,
     },
+    SwitchNovel {
+        id: String,
+    },
+    DeleteNovel {
+        id: String,
+    },
 
     // ── Setting ──
     WriteSetting {
@@ -184,6 +190,12 @@ pub enum DataCommand {
     },
     DeleteSample {
         id: String,
+    },
+    UpdateSample {
+        id: String,
+        novel_id: String,
+        title: String,
+        content: String,
     },
 
     // ── Patch ──

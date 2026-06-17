@@ -104,6 +104,33 @@ pub fn update_novel(
     Ok(())
 }
 
+pub fn delete_novel(conn: &Connection, id: &str) -> Result<()> {
+    conn.execute("DELETE FROM detail_sample WHERE novel_id = ?1", params![id])?;
+    conn.execute("DELETE FROM character WHERE novel_id = ?1", params![id])?;
+    conn.execute("DELETE FROM setting WHERE novel_id = ?1", params![id])?;
+    conn.execute("DELETE FROM plugin WHERE novel_id = ?1", params![id])?;
+    // text_chapter → text_phase 链
+    conn.execute(
+        "DELETE FROM text_chapter WHERE phase_id IN (SELECT id FROM text_phase WHERE novel_id = ?1)",
+        params![id],
+    )?;
+    conn.execute("DELETE FROM text_phase WHERE novel_id = ?1", params![id])?;
+    // outline_chapter → outline_phase 链
+    conn.execute(
+        "DELETE FROM outline_chapter WHERE phase_id IN (SELECT id FROM outline_phase WHERE novel_id = ?1)",
+        params![id],
+    )?;
+    conn.execute("DELETE FROM outline_phase WHERE novel_id = ?1", params![id])?;
+    conn.execute("DELETE FROM novel WHERE id = ?1", params![id])?;
+    Ok(())
+}
+
+pub fn switch_novel(conn: &Connection, id: &str) -> Result<()> {
+    conn.execute("UPDATE novel SET active = 0 WHERE active = 1", [])?;
+    conn.execute("UPDATE novel SET active = 1 WHERE id = ?1", params![id])?;
+    Ok(())
+}
+
 // ── Setting ──
 
 pub fn upsert_setting(conn: &Connection, s: &NovelSetting) -> Result<()> {
@@ -539,6 +566,14 @@ pub fn list_samples(conn: &Connection, novel_id: &str) -> Result<Vec<DetailSampl
         })
     })?;
     rows.collect()
+}
+
+pub fn update_sample(conn: &Connection, s: &DetailSample) -> Result<()> {
+    conn.execute(
+        "UPDATE detail_sample SET title=?1, content=?2 WHERE id=?3",
+        params![s.title, s.content, s.id],
+    )?;
+    Ok(())
 }
 
 pub fn delete_sample(conn: &Connection, id: &str) -> Result<()> {
