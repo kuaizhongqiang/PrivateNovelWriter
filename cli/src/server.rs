@@ -410,10 +410,8 @@ async fn api_novel_create(
     };
     let result = handler.execute(cmd);
     // 自动切换到新小说
-    if let Ok(ref output) = result {
-        if let Output::Novel(ref n) = output {
-            let _ = crud::switch_novel(&handler.conn, &n.id);
-        }
+    if let Ok(Output::Novel(ref n)) = result {
+        let _ = crud::switch_novel(&handler.conn, &n.id);
     }
     match result {
         Ok(output) => Json(ApiResponse::from_output(output)),
@@ -1391,10 +1389,8 @@ async fn api_command(
             };
             let result = handler.execute(cmd);
             // 自动切换到新小说
-            if let Ok(ref output) = result {
-                if let Output::Novel(ref n) = output {
-                    let _ = crud::switch_novel(&handler.conn, &n.id);
-                }
+            if let Ok(Output::Novel(ref n)) = result {
+                let _ = crud::switch_novel(&handler.conn, &n.id);
             }
             return dispatch_result(&state, &body, result);
         }

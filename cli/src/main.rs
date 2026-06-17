@@ -871,9 +871,9 @@ fn handle_text(
                 // 支持 outline chapter ID，自动创建正文章节
                 let tc = {
                     // 先直接查正文章节
-                    if let Some(tc) = crud::get_text_chapter(&handler.conn, &id)? {
+                    if let Some(tc) = crud::get_text_chapter(&handler.conn, id)? {
                         tc
-                    } else if let Some(oc) = crud::get_outline_chapter(&handler.conn, &id)? {
+                    } else if let Some(oc) = crud::get_outline_chapter(&handler.conn, id)? {
                         // outline chapter：检查是否有已关联的 text chapter
                         if let Some(text_id) = oc.text_chapter_id {
                             crud::get_text_chapter(&handler.conn, &text_id)?.ok_or_else(|| {
