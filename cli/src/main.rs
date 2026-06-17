@@ -868,9 +868,99 @@ fn handle_text(
                     buf
                 };
 
-                let tc = crud::get_text_chapter(&handler.conn, id)?.ok_or_else(|| {
-                    pnw_kernel::handler::HandlerError::NotFound(format!("Text chapter {}", id))
-                })?;
+                // 支持 outline chapter ID，自动创建正文章节
+                let tc = {
+                    // 先直接查正文章节
+                    if let Some(tc) = crud::get_text_chapter(&handler.conn, &id)? {
+                        tc
+                    } else if let Some(oc) = crud::get_outline_chapter(&handler.conn, &id)? {
+                        // outline chapter：检查是否有已关联的 text chapter
+                        if let Some(text_id) = oc.text_chapter_id {
+                            crud::get_text_chapter(&handler.conn, &text_id)?.ok_or_else(|| {
+                                pnw_kernel::handler::HandlerError::NotFound(
+                                    format!("Text chapter {} (linked from outline)", text_id),
+                                )
+                            })?
+                        } else {
+                            // 自动创建正文章节（复用 Create 逻辑）
+                            let novel_id = get_active_novel_id(&handler.conn);
+                            let outline_phases = crud::list_outline_phases(&handler.conn, &novel_id)?;
+                            let outline_phase = outline_phases.iter()
+                                .find(|p| p.id == oc.phase_id)
+                                .ok_or_else(|| pnw_kernel::handler::HandlerError::NotFound(
+                                    format!("Outline phase {} for chapter", oc.phase_id),
+                                ))?;
+
+                            // 查找或创建正文卷
+                            let text_phases = crud::list_text_phases(&handler.conn, &novel_id)?;
+                            let text_phase_id = if let Some(tp) = text_phases.iter().find(|tp| tp.sort == outline_phase.sort) {
+                                tp.id.clone()
+                            } else if let Some(tp) = text_phases.first() {
+                                tp.id.clone()
+                            } else {
+                                let tp_id = uuid::Uuid::new_v4().to_string();
+                                let phase = pnw_kernel::models::TextPhase {
+                                    id: tp_id.clone(),
+                                    novel_id: novel_id.clone(),
+                                    sort: outline_phase.sort,
+                                    name: outline_phase.name.clone(),
+                                };
+                                handler.conn.execute(
+                                    "INSERT INTO text_phase (id, novel_id, sort, name) VALUES (?1, ?2, ?3, ?4)",
+                                    rusqlite::params![phase.id, phase.novel_id, phase.sort, phase.name],
+                                )?;
+                                tp_id
+                            };
+
+                            // 获取卷名
+                            let phase_name: String = handler.conn.query_row(
+                                "SELECT name FROM text_phase WHERE id = ?1",
+                                rusqlite::params![text_phase_id],
+                                |row| row.get(0),
+                            ).unwrap_or_else(|_| "unknown".to_string());
+
+                            // 创建正文章节
+                            let tc_id = uuid::Uuid::new_v4().to_string();
+                            let chapters = crud::list_text_chapters(&handler.conn, &text_phase_id)?;
+                            let sort = chapters.iter().map(|c| c.sort).max().unwrap_or(-1) + 1;
+                            let file_path = format!("text/{}/ch-{:03}.txt", phase_name, sort);
+                            let full_path = handler.project_path.join(&file_path);
+
+                            // 确保目录存在
+                            if let Some(parent) = full_path.parent() {
+                                std::fs::create_dir_all(parent).map_err(|e| {
+                                    pnw_kernel::handler::HandlerError::Storage(
+                                        pnw_kernel::storage::StorageError::Io(e),
+                                    )
+                                })?;
+                            }
+
+                            handler.execute(DataCommand::CreateTextChapter {
+                                id: tc_id.clone(),
+                                phase_id: text_phase_id,
+                                sort,
+                                name: oc.chapter_name.clone(),
+                                file_path,
+                            })?;
+
+                            // 更新大纲章节的 text_chapter_id
+                            handler.conn.execute(
+                                "UPDATE outline_chapter SET text_chapter_id=?1 WHERE id=?2",
+                                rusqlite::params![tc_id, oc.id],
+                            )?;
+
+                            crud::get_text_chapter(&handler.conn, &tc_id)?.ok_or_else(|| {
+                                pnw_kernel::handler::HandlerError::NotFound(
+                                    "Created text chapter".to_string(),
+                                )
+                            })?
+                        }
+                    } else {
+                        return Err(pnw_kernel::handler::HandlerError::NotFound(
+                            format!("Chapter {} not found (neither text nor outline)", id),
+                        ));
+                    }
+                };
 
                 let full_path = handler.project_path.join(&tc.file_path);
                 storage::write_text(&full_path, &content)?;

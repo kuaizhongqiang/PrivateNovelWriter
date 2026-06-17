@@ -495,6 +495,22 @@ pub fn update_text_chapter(conn: &Connection, c: &TextChapter) -> Result<()> {
     Ok(())
 }
 
+/// 尝试将 ID 解析为正文章节（支持 outline 或 text chapter ID）
+/// 如果是 outline chapter ID 且有已关联的正文章节，返回关联的正文章节
+pub fn resolve_text_chapter(conn: &Connection, id: &str) -> Result<Option<TextChapter>> {
+    // 先直接查正文章节表
+    if let Some(tc) = get_text_chapter(conn, id)? {
+        return Ok(Some(tc));
+    }
+    // 再查是否是大纲章节且有已关联的正文章节
+    if let Some(oc) = get_outline_chapter(conn, id)? {
+        if let Some(tc_id) = oc.text_chapter_id {
+            return get_text_chapter(conn, &tc_id);
+        }
+    }
+    Ok(None)
+}
+
 pub fn delete_text_chapter(conn: &Connection, id: &str) -> Result<()> {
     conn.execute("DELETE FROM text_chapter WHERE id = ?1", params![id])?;
     Ok(())

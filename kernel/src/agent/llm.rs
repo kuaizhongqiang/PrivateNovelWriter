@@ -89,17 +89,18 @@ impl LlmProvider for OpenAiCompatible {
     async fn chat(&self, messages: &[Message], tools: &[ToolDef]) -> Result<LlmResponse, LlmError> {
         let body = build_request_body(&self.model, messages, tools, false);
 
-        let resp = self
+        let mut req = self
             .client
             .post(format!(
                 "{}/chat/completions",
                 self.base_url.trim_end_matches('/')
             ))
-            .header("Authorization", format!("Bearer {}", self.api_key))
             .header("Content-Type", "application/json")
-            .json(&body)
-            .send()
-            .await?;
+            .json(&body);
+        if !self.api_key.is_empty() {
+            req = req.header("Authorization", format!("Bearer {}", self.api_key));
+        }
+        let resp = req.send().await?;
 
         let status = resp.status();
         if !status.is_success() {
@@ -122,17 +123,18 @@ impl LlmProvider for OpenAiCompatible {
         sender: tokio::sync::mpsc::UnboundedSender<LlmEvent>,
     ) -> Result<(), LlmError> {
         let body = build_request_body(&self.model, messages, tools, true);
-        let resp = self
+        let mut req = self
             .client
             .post(format!(
                 "{}/chat/completions",
                 self.base_url.trim_end_matches('/')
             ))
-            .header("Authorization", format!("Bearer {}", self.api_key))
             .header("Content-Type", "application/json")
-            .json(&body)
-            .send()
-            .await?;
+            .json(&body);
+        if !self.api_key.is_empty() {
+            req = req.header("Authorization", format!("Bearer {}", self.api_key));
+        }
+        let resp = req.send().await?;
 
         let status = resp.status();
         if !status.is_success() {

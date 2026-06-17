@@ -18,7 +18,7 @@ pub async fn execute_evaluate(
     let emit = super::make_emit(event_sender);
 
     emit("read", "读取正文章节");
-    let tc = crud::get_text_chapter(conn, chapter_id)
+    let tc = crud::resolve_text_chapter(conn, chapter_id)
         .map_err(|e| LlmError::Api(format!("DB error: {}", e)))?
         .ok_or_else(|| LlmError::Api(format!("Text chapter {} not found", chapter_id)))?;
 

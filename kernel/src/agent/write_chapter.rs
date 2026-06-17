@@ -3,10 +3,106 @@ use std::sync::Arc;
 
 use crate::db::crud;
 use crate::storage;
+use crate::TextChapter;
 use tokio::sync::Mutex;
 
 use super::llm::{LlmError, LlmEvent, LlmProvider, Message};
 use rusqlite::Connection;
+
+/// 尝试将 ID 解析为正文章节：
+/// 1. 先直接查 text_chapter 表
+/// 2. 如果找不到，尝试作为 outline_chapter ID 查找
+/// 3. 如果找到 outline 且有关联的正文章节，返回之
+/// 4. 如果找到 outline 但无关联，自动创建正文章节并建立关联
+fn resolve_or_create_text_chapter(
+    conn: &Connection,
+    project_path: &Path,
+    novel_id: &str,
+    chapter_id: &str,
+) -> Result<TextChapter, LlmError> {
+    // 先尝试 resolve
+    if let Some(tc) = crud::resolve_text_chapter(conn, chapter_id)
+        .map_err(|e| LlmError::Api(format!("DB error: {}", e)))?
+    {
+        return Ok(tc);
+    }
+
+    // 检查是否 outline chapter
+    let oc = crud::get_outline_chapter(conn, chapter_id)
+        .map_err(|e| LlmError::Api(format!("DB error: {}", e)))?
+        .ok_or_else(|| LlmError::Api(format!("Text chapter {} not found", chapter_id)))?;
+
+    // 获取大纲卷（outline_phase）信息
+    let outline_phases = crud::list_outline_phases(conn, novel_id)
+        .map_err(|e| LlmError::Api(format!("DB error: {}", e)))?;
+    let outline_phase = outline_phases
+        .iter()
+        .find(|p| p.id == oc.phase_id)
+        .ok_or_else(|| LlmError::Api("Outline phase not found".into()))?;
+
+    // 查找或创建对应的正文卷（text_phase）
+    let text_phases = crud::list_text_phases(conn, novel_id)
+        .map_err(|e| LlmError::Api(format!("DB error: {}", e)))?;
+    let text_phase_id = if let Some(tp) = text_phases.iter().find(|tp| tp.sort == outline_phase.sort)
+    {
+        tp.id.clone()
+    } else if let Some(tp) = text_phases.first() {
+        // 没有 sort 匹配的，用第一个正文卷
+        tp.id.clone()
+    } else {
+        // 没有正文卷，创建一个与大纲卷同名的
+        let id = uuid::Uuid::new_v4().to_string();
+        let tp = crate::models::TextPhase {
+            id: id.clone(),
+            novel_id: novel_id.to_string(),
+            sort: outline_phase.sort,
+            name: outline_phase.name.clone(),
+        };
+        crud::create_text_phase(conn, &tp)
+            .map_err(|e| LlmError::Api(format!("DB error: {}", e)))?;
+        id
+    };
+
+    // 获取正文卷名用于文件路径
+    let phase_name: String = conn
+        .query_row(
+            "SELECT name FROM text_phase WHERE id = ?1",
+            rusqlite::params![text_phase_id],
+            |row| row.get(0),
+        )
+        .unwrap_or_else(|_| "unknown".to_string());
+
+    // 生成新的正文章节
+    let tc_id = uuid::Uuid::new_v4().to_string();
+    let chapters = crud::list_text_chapters(conn, &text_phase_id)
+        .map_err(|e| LlmError::Api(format!("DB error: {}", e)))?;
+    let sort = chapters.iter().map(|c| c.sort).max().unwrap_or(-1) + 1;
+    let file_path = format!("text/{}/ch-{:03}.txt", phase_name, sort);
+
+    // 确保目录存在
+    let full_path = project_path.join(&file_path);
+    storage::ensure_dir(&full_path)
+        .map_err(|e| LlmError::Api(format!("IO error: {}", e)))?;
+
+    let tc = crate::models::TextChapter {
+        id: tc_id.clone(),
+        phase_id: text_phase_id,
+        sort,
+        name: oc.chapter_name.clone(),
+        file_path,
+        word_count: 0,
+    };
+    crud::create_text_chapter(conn, &tc)
+        .map_err(|e| LlmError::Api(format!("DB error: {}", e)))?;
+
+    // 更新大纲章节的 text_chapter_id
+    let mut oc = oc;
+    oc.text_chapter_id = Some(tc_id);
+    crud::update_outline_chapter(conn, &oc)
+        .map_err(|e| LlmError::Api(format!("DB error: {}", e)))?;
+
+    Ok(tc)
+}
 
 pub async fn execute_write_chapter(
     conn: &Connection,
@@ -21,9 +117,7 @@ pub async fn execute_write_chapter(
 
     emit("read", "读取正文章节");
 
-    let tc = crud::get_text_chapter(conn, chapter_id)
-        .map_err(|e| LlmError::Api(format!("DB error: {}", e)))?
-        .ok_or_else(|| LlmError::Api(format!("Text chapter {} not found", chapter_id)))?;
+    let tc = resolve_or_create_text_chapter(conn, project_path, novel_id, chapter_id)?;
 
     emit("read", "读取大纲");
     let outline_chapter = crud::find_outline_chapter_by_text_id(conn, novel_id, chapter_id)

@@ -384,7 +384,7 @@ async fn api_chapter_get(
         Ok(h) => h,
         Err(e) => return api_err(e),
     };
-    let tc = match crud::get_text_chapter(&handler.conn, &id) {
+    let tc = match crud::resolve_text_chapter(&handler.conn, &id) {
         Ok(Some(c)) => c,
         Ok(None) => return api_err("Chapter not found"),
         Err(e) => return api_err(e.to_string()),
@@ -420,7 +420,7 @@ async fn api_chapter_save(
         Ok(h) => h,
         Err(e) => return Json(ApiResponse::err_inner(e)),
     };
-    let tc = match crud::get_text_chapter(&handler.conn, &id) {
+    let tc = match crud::resolve_text_chapter(&handler.conn, &id) {
         Ok(Some(c)) => c,
         Ok(None) => return Json(ApiResponse::err_inner("Chapter not found")),
         Err(e) => return Json(ApiResponse::err_inner(e.to_string())),
